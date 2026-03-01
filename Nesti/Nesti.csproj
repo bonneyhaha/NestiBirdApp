@@ -12,8 +12,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Animated GIF support -->
-    <PackageReference Include="WpfAnimatedGif" Version="2.0.0" />
     <!-- .env file reader -->
     <PackageReference Include="DotNetEnv" Version="3.1.1" />
   </ItemGroup>

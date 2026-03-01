@@ -60,6 +60,9 @@ public partial class MainWindow : Window
         PositionAtBottomRight();
         InstallWndProcHook();
 
+        // Point the bird at the shared WriteableBitmap — no event handler needed.
+        BirdImage.Source = SharedGifPlayer.Get("pack://application:,,,/assets/nest_bird.gif").SharedBitmap;
+
         var sysName = UserHelper.GetSystemUsername();
 
         // Pick real WebSocket or dummy test service based on .env flag

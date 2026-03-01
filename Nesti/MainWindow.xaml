@@ -1,7 +1,6 @@
 <Window x:Class="Nesti.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:gif="http://wpfanimatedgif.codeplex.com"
         Title="Nesti"
         Width="700"
         Height="700"
@@ -132,8 +131,7 @@
             </StackPanel>
 
             <!-- ── animated bird — ui.txt spec: 150px width ── -->
-            <Image gif:ImageBehavior.AnimatedSource="pack://application:,,,/assets/nest_bird.gif"
-                   gif:ImageBehavior.RepeatBehavior="Forever"
+            <Image x:Name="BirdImage"
                    Width="150" Height="150"
                    Stretch="Uniform"
                    Cursor="Hand"
