@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>Nesti</AssemblyName>
+    <Version>1.0.0</Version>
+    <Product>Nesti Bird Assistant</Product>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Animated GIF support -->
+    <PackageReference Include="WpfAnimatedGif" Version="2.0.0" />
+    <!-- .env file reader -->
+    <PackageReference Include="DotNetEnv" Version="3.1.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- GIFs embedded as WPF resources (pack:// URI) -->
+    <Resource Include="assets\nest_bird.gif" />
+    <Resource Include="assets\jarvis.gif" />
+
+    <!-- PNG icons embedded as WPF resources -->
+    <Resource Include="assets\cross_button_notif.png" />
+    <Resource Include="assets\minimize_button_icon.png" />
+    <Resource Include="assets\snooze_icon.png" />
+    <Resource Include="assets\cross_button_notif_icon.png" />
+
+    <!-- MP3 copied next to the exe so MediaPlayer can open it by path -->
+    <Content Include="assets\bird_chirp.mp3">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+
+    <!-- .env copied next to the exe so it can be edited without rebuild -->
+    <Content Include=".env">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>

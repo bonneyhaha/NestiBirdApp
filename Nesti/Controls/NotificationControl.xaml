@@ -1,0 +1,122 @@
+<UserControl x:Class="Nesti.Controls.NotificationControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:gif="http://wpfanimatedgif.codeplex.com"
+             Width="380"
+             Margin="0,0,0,8">
+
+    <!-- Slide transform driven from code-behind -->
+    <UserControl.RenderTransform>
+        <TranslateTransform x:Name="SlideTransform" />
+    </UserControl.RenderTransform>
+
+    <!-- Glassmorphism card -->
+    <Border x:Name="Card"
+            Background="#CCFFFFFF"
+            BorderBrush="#40FFFFFF"
+            BorderThickness="1"
+            CornerRadius="14"
+            Padding="12"
+            Cursor="Hand"
+            MouseLeftButtonDown="Card_Click"
+            MouseEnter="Card_MouseEnter"
+            MouseLeave="Card_MouseLeave">
+
+        <Border.Effect>
+            <DropShadowEffect Color="#000000"
+                              Opacity="0.12"
+                              BlurRadius="12"
+                              ShadowDepth="3"
+                              Direction="270" />
+        </Border.Effect>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="52" />   <!-- Col 0: bird icon          -->
+                <ColumnDefinition Width="*" />    <!-- Col 1: title + message    -->
+                <ColumnDefinition Width="28" />   <!-- Col 2: snooze button      -->
+                <ColumnDefinition Width="28" />   <!-- Col 3: dismiss button     -->
+            </Grid.ColumnDefinitions>
+
+            <!-- Bird icon with gradient background -->
+            <Border Grid.Column="0"
+                    Width="44" Height="44"
+                    CornerRadius="10"
+                    VerticalAlignment="Center">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                        <GradientStop Color="#3B82F6" Offset="0" />
+                        <GradientStop Color="#9333EA" Offset="1" />
+                    </LinearGradientBrush>
+                </Border.Background>
+                <Image gif:ImageBehavior.AnimatedSource="pack://application:,,,/assets/jarvis.gif"
+                       gif:ImageBehavior.RepeatBehavior="Forever"
+                       Width="32" Height="32"
+                       Stretch="Uniform" />
+            </Border>
+
+            <!-- Title + message -->
+            <StackPanel Grid.Column="1"
+                        VerticalAlignment="Center"
+                        Margin="10,0,4,0">
+                <TextBlock x:Name="TitleBlock"
+                           FontSize="13"
+                           FontWeight="SemiBold"
+                           Foreground="#1F2937"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="MessageBlock"
+                           FontSize="11"
+                           Foreground="#6B7280"
+                           TextWrapping="Wrap"
+                           MaxHeight="38"
+                           Margin="0,3,0,0"
+                           TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+
+            <!-- Snooze button (col 2) -->
+            <Button x:Name="SnoozeBtn"
+                    Grid.Column="2"
+                    Width="24" Height="24"
+                    VerticalAlignment="Top"
+                    HorizontalAlignment="Center"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Cursor="Hand"
+                    Opacity="0"
+                    ToolTip="Snooze"
+                    Click="Snooze_Click">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Image Source="pack://application:,,,/assets/snooze_icon.png"
+                               Width="22" Height="22"
+                               Stretch="Uniform"
+                               RenderOptions.BitmapScalingMode="HighQuality" />
+                    </ControlTemplate>
+                </Button.Template>
+            </Button>
+
+            <!-- Dismiss button (col 3) -->
+            <Button x:Name="DismissBtn"
+                    Grid.Column="3"
+                    Width="24" Height="24"
+                    VerticalAlignment="Top"
+                    HorizontalAlignment="Center"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Cursor="Hand"
+                    Opacity="0"
+                    ToolTip="Dismiss"
+                    Click="Dismiss_Click">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Image Source="pack://application:,,,/assets/cross_button_notif_icon.png"
+                               Width="22" Height="22"
+                               Stretch="Uniform"
+                               RenderOptions.BitmapScalingMode="HighQuality" />
+                    </ControlTemplate>
+                </Button.Template>
+            </Button>
+
+        </Grid>
+    </Border>
+</UserControl>

@@ -1,0 +1,21 @@
+# ── Build output ──────────────────────────────────────────────────────────────
+bin/
+obj/
+
+# ── Visual Studio / Rider ─────────────────────────────────────────────────────
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# ── OS generated ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Claude Code ───────────────────────────────────────────────────────────────
+.claude/
+
+# NOTE: .env is intentionally NOT ignored — it is part of the project config.

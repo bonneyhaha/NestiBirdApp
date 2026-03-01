@@ -1,0 +1,497 @@
+================================================================================
+ NESTI BIRD ASSISTANT — PROJECT DOCUMENTATION
+ WPF / C# / .NET 8   |   Version 1.0.0
+================================================================================
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 1. PROJECT STRUCTURE — WHERE EVERY FILE LIVES
+────────────────────────────────────────────────────────────────────────────────
+
+POC-2-WPF/
+└── Nesti/                              ← Solution root
+    ├── document.txt                    ← THIS FILE
+    ├── README.md                       ← Markdown project overview
+    ├── Nesti.slnx                      ← Visual Studio solution file
+    └── Nesti/                          ← C# project folder
+        │
+        ├── Nesti.csproj                ← Project config: target framework,
+        │                                  NuGet packages, asset inclusion rules.
+        │
+        ├── .env                        ← Runtime configuration (edit freely).
+        │                                  All URLs, timeouts, feature flags.
+        │                                  Copied next to Nesti.exe on every build.
+        │
+        ├── App.xaml                    ← WPF application entry point XAML.
+        ├── App.xaml.cs                 ← Minimal OnStartup hook.
+        │
+        ├── MainWindow.xaml             ← Main UI: 700×700 transparent window.
+        │                                  • BirdContainer (2-row Grid):
+        │                                      Row 0 (32 px): Hide + Close PNG buttons
+        │                                      Row 1 (*):     Animated bird GIF
+        │                                  • GreetingBubble (extends left on hover)
+        │                                  • NotificationsPanel (StackPanel, bottom-right)
+        │
+        ├── MainWindow.xaml.cs          ← All orchestration logic:
+        │                                  • PositionAtBottomRight()
+        │                                  • WM_NCHITTEST hook (selective click-through)
+        │                                  • IsInteractive(): checks BirdContainer,
+        │                                    GreetingBubble (explicit), notification cards
+        │                                  • WebSocket service wiring (real or dummy)
+        │                                  • Notification add / remove / dedup
+        │                                  • Sound play on notification
+        │                                  • Bird hide / restore logic
+        │
+        ├── AssemblyInfo.cs             ← Standard WPF theme metadata (auto-gen).
+        │
+        ├── assets/                     ← Static assets bundled with the app.
+        │   ├── nest_bird.gif           ← Animated bird mascot (displayed 155×155).
+        │   │                              Embedded as WPF Resource (pack://).
+        │   ├── jarvis.gif              ← Small animated icon in notification cards
+        │   │                              (displayed 32×32).
+        │   │                              Embedded as WPF Resource (pack://).
+        │   ├── minimize_button_icon.png← PNG icon for the Hide button above the bird.
+        │   │                              Embedded as WPF Resource (pack://).
+        │   ├── cross_button_notif.png  ← PNG icon for the Close (exit app) button
+        │   │                              above the bird.
+        │   │                              Embedded as WPF Resource (pack://).
+        │   ├── snooze_icon.png         ← PNG icon on notification cards (col 2).
+        │   │                              Clicking it snoozes via MARS API.
+        │   │                              Embedded as WPF Resource (pack://).
+        │   ├── cross_button_notif_icon.png ← PNG icon on notification cards (col 3).
+        │   │                              Clicking it marks as read + dismisses.
+        │   │                              Embedded as WPF Resource (pack://).
+        │   └── bird_chirp.mp3          ← Notification sound.
+        │                                  Copied to output dir (not embedded)
+        │                                  so MediaPlayer can open it by file path.
+        │
+        ├── Models/
+        │   └── NotificationMessage.cs  ← JSON-deserialised WebSocket payload.
+        │                                  Fields: id, instanceId, title,
+        │                                  message, description, url, type,
+        │                                  notificationType, user_id, timestamp.
+        │                                  Computed: DedupeKey, Body.
+        │
+        ├── Helpers/
+        │   ├── AppConfig.cs            ← Reads .env on first access via DotNetEnv.
+        │   │                              Exposes typed static properties:
+        │   │                              WsUrl, ApiBaseUrl, MarsSnoozeUrl,
+        │   │                              MarkAsReadUrl, MaxNotifications, …
+        │   └── UserHelper.cs           ← GetSystemUsername() — Windows login.
+        │                                  GetFullNameAsync() — calls REST API.
+        │                                  GetFirstName()    — friendly first name.
+        │                                  GetGreeting()     — time-of-day greeting.
+        │
+        ├── Services/
+        │   ├── IWebSocketSource.cs     ← Interface shared by the real and dummy
+        │   │                              WebSocket services.
+        │   │                              Events: NotificationReceived, StatusChanged
+        │   │                              Method: ConnectAsync(url)
+        │   │
+        │   ├── WebSocketService.cs     ← Real ClientWebSocket wrapper.
+        │   │                              ResolveUrlAsync() — calls API or uses WS_URL.
+        │   │                              ConnectAsync()    — starts receive loop.
+        │   │                              Auto-reconnects with exponential back-off.
+        │   │
+        │   ├── DummyWebSocketService.cs← Test mode service (USE_REAL_WEBSOCKET=false).
+        │   │                              Fires 7 rotating fake notifications on a
+        │   │                              DispatcherTimer (interval: DUMMY_INTERVAL_MS).
+        │   │                              Each message gets unique IDs to bypass dedup.
+        │   │
+        │   ├── SoundService.cs         ← MediaPlayer wrapper for MP3 playback.
+        │   │                              Play() — opens file by path and plays.
+        │   │
+        │   └── NotificationApiService.cs ← Static HTTP service for notification actions.
+        │                                   SnoozeAsync(id)      → POST MARS_SNOOZE_URL
+        │                                   MarkAsReadAsync(id)  → POST MARK_AS_READ_URL
+        │                                                           + stores id in local
+        │                                                           dismissed.json file.
+        │                                   IsDismissed(id)      → checks local store.
+        │                                   Local store path:
+        │                                   %AppData%\Nesti\dismissed.json
+        │
+        ├── Controls/
+        │   ├── NotificationControl.xaml    ← Single notification card UI.
+        │   │                                  Glassmorphism border (CornerRadius 14).
+        │   │                                  4-column Grid:
+        │   │                                    Col 0: gradient border + jarvis.gif
+        │   │                                    Col 1: title + body text
+        │   │                                    Col 2: snooze_icon.png button
+        │   │                                    Col 3: cross_button_notif_icon.png
+        │   │                                  Buttons appear (opacity 0 → 0.75)
+        │   │                                  only on card hover.
+        │   │
+        │   └── NotificationControl.xaml.cs ← Properties: NotificationId, NotificationUrl
+        │                                      Events: DismissRequested, SnoozeRequested
+        │                                      SetData(id, title, body, url)
+        │                                      OnLoaded()   → slide-in animation
+        │                                      AnimateOut() → slide-out animation
+        │                                      Snooze_Click → NotificationApiService
+        │                                                      .SnoozeAsync() + event
+        │                                      Dismiss_Click→ NotificationApiService
+        │                                                      .MarkAsReadAsync() + event
+        │                                      Card_Click   → opens URL in browser
+        │
+        ├── bin/                        ← Build output (auto-generated, ignore).
+        │   ├── Debug/net8.0-windows/   ← Debug exe lives here.
+        │   └── Release/net8.0-windows/ ← Release exe lives here.
+        │
+        └── obj/                        ← Intermediate build files (ignore).
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 2. CONFIGURATION — .env FILE KEYS
+────────────────────────────────────────────────────────────────────────────────
+
+ File location at runtime:
+   Same folder as Nesti.exe  (e.g. bin\Debug\net8.0-windows\.env)
+ The .env in the SOURCE folder is the master copy — copied on every build.
+ No recompile needed to change any value.
+
+ Key                        Default                              Purpose
+ ─────────────────────────  ───────────────────────────────────  ──────────────────
+ WS_URL                     wss://localhost:8080/ws              WebSocket endpoint.
+                                                                  Used directly when
+                                                                  API path is blank.
+
+ WS_RECONNECT_BASE_MS       2000                                 First reconnect
+                                                                  delay (ms).
+                                                                  Doubles each retry.
+
+ WS_RECONNECT_MAX_ATTEMPTS  10                                   Give up after this
+                                                                  many failures.
+
+ API_BASE_URL               (blank)                              Base URL for REST.
+                                                                  Leave blank to skip
+                                                                  all API calls.
+
+ API_GET_WS_URL_PATH        (blank)                              GET ?username=…
+                                                                  Response: {wsUrl}
+                                                                  Leave blank to use
+                                                                  WS_URL directly.
+
+ API_GET_FULLNAME_PATH      (blank)                              GET ?username=…
+                                                                  Response: {fullName}
+                                                                  Leave blank to use
+                                                                  Windows login name.
+
+ BIRD_DEFAULT_URL           (blank)                              Opens in browser
+                                                                  when bird is clicked.
+
+ NOTIFICATION_DURATION_MS   10000                                How long each card
+                                                                  stays on screen (ms).
+
+ MAX_NOTIFICATIONS          5                                    Cards visible at once.
+                                                                  Oldest removed when
+                                                                  limit is reached.
+
+ SOUND_ENABLED              true                                 true / false.
+
+ USE_REAL_WEBSOCKET         true                                 true  → connect to
+                                                                  real WebSocket server.
+                                                                  false → use Dummy
+                                                                  service (test mode).
+
+ DUMMY_INTERVAL_MS          5000                                 How often the dummy
+                                                                  service fires a fake
+                                                                  notification (ms).
+                                                                  Only used when
+                                                                  USE_REAL_WEBSOCKET=false
+
+ MARS_SNOOZE_URL            (blank)                              POST endpoint called
+                                                                  when user clicks the
+                                                                  snooze button.
+                                                                  Body: { "id": "…" }
+
+ MARK_AS_READ_URL           (blank)                              POST endpoint called
+                                                                  when user clicks the
+                                                                  dismiss (×) button.
+                                                                  Body: { "id": "…" }
+                                                                  ID also stored locally
+                                                                  in dismissed.json.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 3. APPLICATION FLOW
+────────────────────────────────────────────────────────────────────────────────
+
+ STARTUP
+ ───────
+ 1. App.xaml launches MainWindow.
+ 2. Window_Loaded fires:
+      a. Window positioned at bottom-right of WorkArea (–5 px padding).
+      b. WM_NCHITTEST hook installed — selective click-through begins.
+      c. UserHelper.GetSystemUsername() reads Windows login name.
+      d. UserHelper.GetFullNameAsync() calls REST API (if configured).
+      e. Greeting bubble text set: "Good Morning, Jane!"
+      f. Reads USE_REAL_WEBSOCKET from .env:
+           true  → WebSocketService:
+                     ResolveUrlAsync() → GET API or WS_URL fallback
+                     ConnectAsync(wsUrl) starts the receive loop.
+           false → DummyWebSocketService:
+                     ConnectAsync() starts DispatcherTimer.
+                     Fires rotating fake notifications every DUMMY_INTERVAL_MS.
+
+ CLICK-THROUGH (WM_NCHITTEST)
+ ─────────────────────────────
+ Windows sends WM_NCHITTEST before every mouse event.
+ Our WndProc hook intercepts it and:
+   • Returns HTTRANSPARENT (−1) for empty transparent areas
+     → clicks fall through to the desktop / apps underneath.
+   • Returns HTCLIENT (1) for:
+       – BirdContainer (including the 32 px button row)
+       – GreetingBubble when Visible (it extends left outside BirdContainer)
+       – Any active notification card in NotificationsPanel
+     → window receives the click normally.
+ No WS_EX_TRANSPARENT flag toggling needed — cleaner, no flicker.
+
+ NOTIFICATION RECEIVED
+ ──────────────────────
+ WebSocketService / DummyWebSocketService (background / timer thread)
+   → Fires NotificationReceived event with NotificationMessage
+
+ MainWindow.OnNotificationReceived (marshalled to UI thread via Dispatcher.Invoke)
+   → Checks DedupeKey — drops duplicate messages
+   → If bird was hidden: restores BirdContainer + NotificationsPanel
+   → If at MAX_NOTIFICATIONS: removes oldest card (no animation)
+   → Creates NotificationControl, calls SetData(id, title, body, url)
+   → Adds card to NotificationsPanel (StackPanel, bottom-right stacked)
+   → NotificationControl.Loaded fires → slide-in animation plays
+   → Starts DispatcherTimer (NOTIFICATION_DURATION_MS)
+   → SoundService.Play() plays bird_chirp.mp3
+
+ NOTIFICATION AUTO-DISMISS
+ ──────────────────────────
+ DispatcherTimer.Tick fires after NOTIFICATION_DURATION_MS:
+   → RemoveNotification(ctrl, animate:true)
+   → NotificationControl.AnimateOut() slides card out to the right
+   → Callback removes control from StackPanel
+
+ USER SNOOZES (snooze button on card)
+ ──────────────────────────────────────
+ Snooze_Click fires:
+   → NotificationApiService.SnoozeAsync(notificationId)
+       POST MARS_SNOOZE_URL  { "id": "…" }  (fire-and-forget, no crash on failure)
+   → SnoozeRequested event raised
+   → MainWindow catches it → RemoveNotification(ctrl) → AnimateOut()
+
+ USER DISMISSES (× button on card)
+ ────────────────────────────────────
+ Dismiss_Click fires:
+   → NotificationApiService.MarkAsReadAsync(notificationId)
+       POST MARK_AS_READ_URL  { "id": "…" }
+       + stores id to %AppData%\Nesti\dismissed.json
+   → DismissRequested event raised
+   → MainWindow catches it → RemoveNotification(ctrl) → AnimateOut()
+
+ CARD CLICKED (body area)
+ ─────────────────────────
+ Card_Click → Process.Start(notificationUrl) → opens in default browser.
+
+ BIRD HOVER
+ ──────────
+ MouseEnter on BirdContainer:
+   → ControlButtons (Hide / Close PNG icons) → Visible
+   → GreetingBubble fades in (opacity 0 → 1, 200 ms)
+
+ MouseLeave on BirdContainer:
+   → ControlButtons → Collapsed
+   → GreetingBubble fades out (opacity 1 → 0, 200 ms) → Collapsed
+
+ Note: BirdContainer uses a 2-row Grid (Row 0 = 32 px buttons, Row 1 = bird GIF).
+ Buttons are INSIDE the layout bounds so hover is detected correctly.
+ GreetingBubble is also checked explicitly in IsInteractive() because it
+ extends outside the BirdContainer bounds to the left.
+
+ HIDE BUTTON
+ ───────────
+ _birdHidden = true
+ BirdContainer and NotificationsPanel → Collapsed
+ WndProc returns HTTRANSPARENT for the entire window (fully click-through).
+ On next notification received → bird and panel are automatically restored.
+
+ CLOSE BUTTON
+ ────────────
+ Application.Current.Shutdown() → Window_Closing → WebSocketService.Dispose()
+
+ RECONNECTION (real WebSocket only)
+ ────────────────────────────────────
+ Connection drop detected in ListenAsync loop
+ → ScheduleReconnectAsync():
+     attempt 1 : wait  2 s  (WS_RECONNECT_BASE_MS × 2^0)
+     attempt 2 : wait  4 s
+     attempt 3 : wait  8 s
+     …
+     attempt N : wait min(base × 2^(N−1), 60 000) ms
+     > MAX_ATTEMPTS : StatusChanged("failed"), stop retrying.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 4. BUILD & RUN COMMANDS
+────────────────────────────────────────────────────────────────────────────────
+
+ Run all commands from the PROJECT folder:
+   cd "POC-2-WPF\Nesti\Nesti"
+
+ ── DEVELOPMENT ────────────────────────────────────────────────────────────────
+
+ Restore NuGet packages (first time, or after adding a package):
+   dotnet restore
+
+ Build (Debug):
+   dotnet build --configuration Debug
+
+ Run (Debug, prints WebSocket status to debug output):
+   dotnet run
+
+ Run the compiled exe directly (no console window):
+   bin\Debug\net8.0-windows\Nesti.exe
+
+ Quick test without a real server — set in .env:
+   USE_REAL_WEBSOCKET=false
+   DUMMY_INTERVAL_MS=3000
+
+ ── PRODUCTION ─────────────────────────────────────────────────────────────────
+
+ Build (Release, optimised):
+   dotnet build --configuration Release
+
+ Publish — framework-dependent (requires .NET 8 on target machine):
+   dotnet publish -c Release -r win-x64
+
+   Output: bin\Release\net8.0-windows\win-x64\publish\
+
+ Publish — self-contained single EXE (no .NET required on target machine):
+   dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+
+   Output: bin\Release\net8.0-windows\win-x64\publish\Nesti.exe  (~60 MB)
+
+ IMPORTANT — files that must travel WITH Nesti.exe:
+   .env                    ← configuration (edit to change URLs, no recompile)
+   assets\bird_chirp.mp3   ← notification sound
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 5. EDITING CONFIGURATION WITHOUT REBUILDING
+────────────────────────────────────────────────────────────────────────────────
+
+ During development:
+   Edit  Nesti\Nesti\.env
+   The build copies it to the output folder automatically.
+
+ On a deployed machine:
+   Edit  <install-dir>\.env  (the copy next to the exe)
+   Restart Nesti.exe — changes take effect immediately.
+
+ You do NOT need to recompile to change any URL, timeout, or feature flag.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 6. NuGet PACKAGES
+────────────────────────────────────────────────────────────────────────────────
+
+ Package             Version   Purpose
+ ──────────────────  ────────  ────────────────────────────────────────────────
+ WpfAnimatedGif      2.0.0     Renders animated GIF files inside WPF Image
+                               controls via the gif:ImageBehavior attached
+                               property. Used for nest_bird.gif and jarvis.gif.
+
+ DotNetEnv           3.1.1     Parses the .env file and sets each key as a
+                               process environment variable on startup.
+                               AppConfig.cs reads them via
+                               Environment.GetEnvironmentVariable().
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 7. NOTIFICATION BUTTON BEHAVIOUR
+────────────────────────────────────────────────────────────────────────────────
+
+ Button              Icon                          Action
+ ──────────────────  ────────────────────────────  ────────────────────────────
+ Bird: Hide          minimize_button_icon.png       Hides bird + panel until next
+                                                    notification arrives.
+
+ Bird: Close         cross_button_notif.png         Shuts down Nesti completely.
+
+ Card: Snooze        snooze_icon.png                POST MARS_SNOOZE_URL
+                     (appears on card hover)        Slides card out immediately.
+                                                    Payload: { "id": "<id>" }
+                                                    Fill additional fields in
+                                                    NotificationApiService.cs.
+
+ Card: Dismiss       cross_button_notif_icon.png    POST MARK_AS_READ_URL
+                     (appears on card hover)        Stores id in dismissed.json
+                                                    Slides card out immediately.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 8. LOCAL DISMISSED IDs STORE
+────────────────────────────────────────────────────────────────────────────────
+
+ Path:   %AppData%\Nesti\dismissed.json
+
+ Format: ["id-1", "id-2", …]
+
+ Populated by: NotificationApiService.MarkAsReadAsync()
+ Checked by:   NotificationApiService.IsDismissed()
+
+ Purpose: Prevents previously dismissed notifications from reappearing
+          after an app restart (call IsDismissed before showing any card).
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 9. RAM & GLASSMORPHISM NOTES
+────────────────────────────────────────────────────────────────────────────────
+
+ Element                      Cost       Notes
+ ───────────────────────────  ─────────  ─────────────────────────────────────
+ DropShadowEffect             HIGH       Creates an offscreen GPU bitmap per
+                                         element. BlurRadius has been reduced:
+                                         Notification card: 20 → 12
+                                         GreetingBubble:    16 → 8
+                                         Remove entirely to free the most RAM.
+
+ Animated GIFs                MEDIUM     All frames decoded and held in memory.
+                                         nest_bird.gif (~150 frames) is the
+                                         largest. Replace with static PNG to
+                                         eliminate this cost.
+
+ Semi-transparent Background  LOW        WPF compositing — no extra bitmaps.
+ (#CCFFFFFF, #40FFFFFF)                  Safe to keep.
+
+ CornerRadius on Border        LOW        Clip mask only. Negligible.
+
+ LinearGradientBrush           LOW        GPU gradient, no bitmap. Negligible.
+
+ To reduce RAM further (in priority order):
+   1. Remove DropShadowEffect from NotificationControl.xaml and/or
+      GreetingBubble in MainWindow.xaml.
+   2. Replace animated jarvis.gif with a static PNG icon.
+   3. Replace nest_bird.gif with a static PNG bird.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 10. QUICK REFERENCE — KEY SOURCE LOCATIONS
+────────────────────────────────────────────────────────────────────────────────
+
+ Task                                   File to edit
+ ─────────────────────────────────────  ─────────────────────────────────────
+ Change any URL / timeout / flag        Nesti\.env
+ Change window size or position         MainWindow.xaml (Width/Height attrs)
+                                        MainWindow.xaml.cs → PositionAtBottomRight()
+ Change bird size                       MainWindow.xaml → Image Width/Height in Row 1
+ Change notification card style         Controls\NotificationControl.xaml
+ Change slide-in / slide-out speed      Controls\NotificationControl.xaml.cs
+                                        → OnLoaded(), AnimateOut()
+ Change greeting text logic             Helpers\UserHelper.cs → GetGreeting()
+ Change WebSocket JSON parsing          Services\WebSocketService.cs → ParseAndRaise()
+ Change max notifications / duration    Nesti\.env  (no recompile needed)
+ Change snooze API payload              Services\NotificationApiService.cs
+                                        → SnoozeAsync() body object
+ Add a new .env key                     1. Add to Nesti\.env
+                                        2. Add property in Helpers\AppConfig.cs
+                                        3. Use AppConfig.YourNewProperty anywhere
+ Enable / disable dummy notifications   Nesti\.env → USE_REAL_WEBSOCKET=false
+ Change dummy notification interval     Nesti\.env → DUMMY_INTERVAL_MS=3000
+
+================================================================================
