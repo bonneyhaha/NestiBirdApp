@@ -1,0 +1,1466 @@
+ ================================================================================
+ NEST BIRD ASSISTANT -UI ELEMENTS & ICONS DOCUMENTATION
+ ================================================================================
+ Last Updated: March 1, 2026
+ Project: Tauri + React Bird Assistant Application
+
+ ================================================================================
+ TABLE OF CONTENTS
+ ================================================================================
+ 1. UI CONTROL BUTTONS
+ 2. ASSETS & ICONS INVENTORY
+ 3. USE CASES FOR UI ELEMENTS
+ 4. BUTTON IMPLEMENTATION DETAILS
+ 5. STYLING SPECIFICATIONS
+ 6. USER INTERACTION PATTERNS
+ 7. CSS TRANSLATION GUIDE (For Porting to Any Language)
+
+ ================================================================================
+ 1. UI CONTROL BUTTONS
+ ================================================================================
+
+ The application mimics desktop window controls with two primary buttons:
+   a) Hide/Minimize Button
+   b) Close/Cross Button
+
+ Both buttons appear in a floating control panel that:
+   -Shows on hover over the bird mascot
+   - Uses fade-in animation (fadeInUp)
+   - Positioned at top-right corner relative to the bird
+   - Has glassmorphism styling for modern appearance
+
+ ================================================================================
+ 2. ASSETS & ICONS INVENTORY
+ ================================================================================
+
+ BIRD ANIMATION ASSETS (GIF):
+ ├── jarvis.gif
+ │   ├── Used as: Notification avatar in SystemGenerated notifications
+ │   ├── Size: ~8x8(when displayed in notifications)
+ │   ├── Purpose: Represents the NEST AI assistant
+ │   └── Location: NotificationComponent.jsx line 5, ~379
+ │
+ ├── nest_jarvis_bird.gif (or Notification_bird_2.gif)
+ │   ├── Used as: Main bird mascot (bottom-right corner)
+ │   ├── Size: ~150px width
+ │   ├── Purpose: Interactive assistant, navigation to main app
+ │   └── Location: App.jsx line 11
+ │
+ ├── nest_bird.gif
+ │   ├── Status: Available(not currently used)
+ │   └── Purpose: Alternative bird animation
+ │
+ ├── Bird_Notfication.gif
+ │   ├── Status: Available(not currently used)
+ │   └── Purpose: Bird notification animation
+ │
+ └── nest_bird_ai.gif
+     ├── Status: Available(not currently used)
+     └── Purpose: AI - themed bird animation
+
+ SVG ICON ASSETS:
+ ├── invite_card.svg
+ │   ├── Status: Available(commented out)
+ │   ├── Purpose: Invitation card design for greetings
+ │   └── Location: src / assets /
+ │
+ ├── invite_card2.svg
+ │   ├── Status: Available(commented out)
+ │   ├── Purpose: Alternative invitation card design
+ │   └── Location: src / assets /
+ │
+ ├── navigation_icon.svg
+ │   ├── Status: Available(commented out)
+ │   ├── Purpose: Location / marker icon for event directions
+ │   └── Location: src / assets /
+ │
+ ├── bubble_img.svg
+ │   ├── Status: Available(commented out)
+ │   ├── Purpose: Speech bubble graphic
+ │   └── Location: src/assets/
+ │
+ └── snooze_icon.svg
+     ├── Status: Available (commented out)
+     ├── Purpose: Snooze/dismiss notification action icon
+     └── Location: src/assets/
+
+ AUDIO ASSETS:
+ └── nest_bird_sound.wav
+     ├── Used as: Notification sound alert
+     ├── Trigger: On SystemGenerated notification arrival
+     └── Location: src/assets/
+
+ LOGO ASSETS:
+ └── Logo (1).ico
+     ├── Status: Available
+     └── Purpose: Application icon
+
+ ================================================================================
+ 3. USE CASES FOR UI ELEMENTS
+ ================================================================================
+
+ A) MINIMIZE/HIDE BUTTON (Dash Icon)
+    ┌─────────────────────────────────────────────────────────────────────┐
+    │ VISUAL: Horizontal line (-) in circular button                      │
+    │ ICON: SVG path "M3 7L11 7"                                          │
+    └─────────────────────────────────────────────────────────────────────┘
+
+    PRIMARY USE CASES:
+    1. Temporarily hide the bird mascot from view
+    2. Hide the control panel when not needed
+    3. Allow users to minimize the assistant without closing the app
+    4. Maintain notification system in background
+
+    USER BEHAVIOR:
+    - User hovers over bird → control panel appears
+    - User clicks minimize button → bird disappears
+    - Bird can be brought back (implementation dependent)
+    - Notifications continue to work even when bird is hidden
+
+    TECHNICAL BEHAVIOR:
+    - Triggers: handleCloseBird(true)
+    - Sets state: hide = true
+    - Makes window click-through (passing clicks to background)
+    - Bird visibility: hidden
+    - Notifications: still visible and functional
+
+ B) CLOSE/CROSS BUTTON (X Icon)
+    ┌─────────────────────────────────────────────────────────────────────┐
+    │ VISUAL: Cross (X) in circular button                                │
+    │ ICON: SVG path "M10.5 3.5L3.5 10.5M3.5 3.5L10.5 10.5"             │
+    └─────────────────────────────────────────────────────────────────────┘
+
+    PRIMARY USE CASES:
+    1. Quit the entire bird assistant application
+    2. Close all notifications and remove from screen
+    3. Terminate the WebSocket connection
+    4. Free up system resources completely
+
+    USER BEHAVIOR:
+    - User hovers over bird → control panel appears
+    - User clicks close button → application terminates
+    - No confirmation dialog (immediate action)
+    - Window closes completely
+
+    TECHNICAL BEHAVIOR:
+    - Triggers: handleRemoveApp()
+    - Calls: tauriAPI.quitApp()
+    - Closes: All Tauri windows
+    - Terminates: WebSocket connections
+    - Frees: All application resources
+
+ C) BIRD MASCOT IMAGE (nest_jarvis_bird.gif)
+    ┌─────────────────────────────────────────────────────────────────────┐
+    │ VISUAL: Animated bird character                                     │
+    │ SIZE: 150px width, auto height                                      │
+    └─────────────────────────────────────────────────────────────────────┘
+
+    PRIMARY USE CASES:
+    1. Visual anchor for the assistant
+    2. Clickable navigation to main app URL
+    3. Hover trigger for control panel display
+    4. Interactive element for user engagement
+
+    USER BEHAVIOR:
+    - Mouse hover: Makes window clickable (captures clicks)
+    - Mouse leave: Makes window click-through (passes clicks)
+    - Click: Opens main application URL
+    - Context menu: Can trigger close button (not currently active)
+
+    TECHNICAL BEHAVIOR:
+    - Hover: handleMouseEnter() → tauriAPI.setClickable(true)
+    - Leave: handleMouseLeave() → tauriAPI.setClickable(false)
+    - Click: handlePopUpNotification() → opens external URL
+    - Position: Bottom-right corner of screen
+
+ D) NOTIFICATION BIRD ICON (jarvis.gif)
+    ┌─────────────────────────────────────────────────────────────────────┐
+    │ VISUAL: Small bird avatar in notifications                          │
+    │ SIZE: 32px (8x8 in design units)                                    │
+    └─────────────────────────────────────────────────────────────────────┘
+
+    PRIMARY USE CASES:
+    1. Visual branding in notification cards
+    2. Identifies notification source (NEST system)
+    3. Adds visual consistency across notifications
+    4. Provides immediate recognition of system notifications
+
+    TECHNICAL BEHAVIOR:
+    - Displayed in: SystemGenerated notification type
+    - Styling: Rounded container with gradient background
+    - Hover effect: Scales up to 110% (group-hover:scale-110)
+    - Background: Blue to purple gradient (from-blue-500 to-purple-600)
+
+ ================================================================================
+ 4. BUTTON IMPLEMENTATION DETAILS
+ ================================================================================
+
+ BUTTON CODE STRUCTURE:
+ ─────────────────────────────────────────────────────────────────────────────
+
+ <div className={`absolute top-0 right-0 flex items-center gap-2 
+                  ${aiInfo ? 'opacity-100 animate-fadeInUp' : 'opacity-0 hidden'}`}>
+
+     <!-- MINIMIZE BUTTON -->
+     <button 
+         title={'Hide'} 
+         onClick={() => handleCloseBird(true)} 
+         className='text-xl bg-gray-50 border p-[1px] rounded-full cursor-pointer'
+     >
+         <svg 
+             xmlns="http://www.w3.org/2000/svg" 
+             width="12" 
+             height="12" 
+             viewBox="0 0 14 14" 
+             fill="none"
+         >
+             <path 
+                 d="M3 7L11 7" 
+                 stroke="#6B7280" 
+                 stroke-width="1.5" 
+                 stroke-linecap="round" 
+                 stroke-linejoin="round" 
+             />
+         </svg>
+     </button>
+
+     <!-- CLOSE BUTTON -->
+     <button 
+         title={'Close'} 
+         onClick={() => handleRemoveApp()} 
+         className='text-xl bg-gray-50 border p-[1px] rounded-full cursor-pointer'
+     >
+         <svg 
+             xmlns="http://www.w3.org/2000/svg" 
+             width="12" 
+             height="12" 
+             viewBox="0 0 14 14" 
+             fill="none"
+         >
+             <path 
+                 d="M10.5 3.5L3.5 10.5M3.5 3.5L10.5 10.5" 
+                 stroke="#6B7280" 
+                 strokeWidth="1.5" 
+                 strokeLinecap="round" 
+                 strokeLinejoin="round" 
+             />
+         </svg>
+     </button>
+ </div>
+
+ HANDLER FUNCTIONS:
+ ─────────────────────────────────────────────────────────────────────────────
+
+ handleCloseBird(data):
+   • Purpose: Hide/minimize the bird mascot
+   • Parameter: Boolean (true = hide, false = show)
+   • Effects:
+     - Sets hide state variable
+     - If hiding, makes window click-through
+     - Hides bird from view
+
+ handleRemoveApp():
+   • Purpose: Quit the entire application
+   • Parameters: None
+   • Effects:
+     - Calls Tauri API to quit app
+     - Closes all windows
+     - Terminates WebSocket connections
+     - Frees all resources
+
+ showAiInfo(state):
+   • Purpose: Toggle control panel visibility
+   • Parameter: Boolean (true = show, false = hide)
+   • Effects:
+     - Controls aiInfo state variable
+     - Triggers CSS animations
+     - Shows/hides control panel with buttons
+
+ ================================================================================
+ 5. STYLING SPECIFICATIONS
+ ================================================================================
+
+ BUTTON STYLES:
+ ─────────────────────────────────────────────────────────────────────────────
+
+ Common Styles (Both Buttons):
+   • Background: bg-gray-50 (light gray #F9FAFB)
+   • Border: border (1px solid #E5E7EB)
+   • Shape: rounded-full (circular)
+   • Padding: p-[1px] (minimal padding)
+   • Cursor: cursor-pointer (pointer on hover)
+   • Font size: text-xl (larger than SVG, uses as container)
+   • Gap: gap-2 (8px spacing between buttons)
+   • Position: absolute top-0 right-0 (top-right of container)
+
+ SVG Icon Styles:
+   • Width: width="12" (12px)
+   • Height: height="12" (12px)
+   • ViewBox: viewBox="0 0 14 14" (14x14 coordinate system)
+   • Fill: fill="none" (transparent)
+   • Stroke: stroke="#6B7280" (medium gray)
+   • Stroke Width: strokeWidth="1.5" (1.5px)
+   • Line Cap: strokeLinecap="round" (rounded line ends)
+   • Line Join: strokeLinejoin="round" (rounded corners)
+
+ CONTROL PANEL ANIMATION:
+ ─────────────────────────────────────────────────────────────────────────────
+
+ Visible State:
+   • CSS class: opacity-100 animate-fadeInUp
+   • Opacity: 100%
+   • Animation: fadeInUp keyframe
+   • Duration: 1.5s
+   • Timing: cubic-bezier(0.34, 1.30, 0.64, 1) (bouncy)
+
+ Hidden State:
+   • CSS class: opacity-0 hidden
+   • Opacity: 0%
+   • Display: none (hidden utility)
+
+ Animation Definition (fadeInUp):
+   @keyframes fadeInUp {
+     from {
+       opacity: 0;
+       transform: translateY(20px) scale(0.95);
+     }
+     to {
+       opacity: 1;
+       transform: translateY(0) scale(1);
+     }
+   }
+
+ VISIBILITY CONDITIONS:
+ ─────────────────────────────────────────────────────────────────────────────
+
+ Control panel appears when:
+   1. aiInfo state is true
+   2. User hovers over the bird mascot
+   3. Control panel is not hidden by other logic
+
+ Control panel disappears when:
+   1. aiInfo state is false
+   2. Mouse leaves the bird area
+   3. User clicks outside the container (clickOutside handler)
+   4. Window loses focus (blur handler)
+
+ HOVER INTERACTIONS:
+ ─────────────────────────────────────────────────────────────────────────────
+
+ Mouse Enter (on bird container):
+   • Sets aiInfo = true (shows control panel)
+   • Calls handleMouseEnter()
+   • Makes window clickable: tauriAPI.setClickable(true)
+   • Enables interaction with all UI elements
+
+ Mouse Leave (on bird container):
+   • Sets aiInfo = false (hides control panel)
+   • Calls handleMouseLeave()
+   • Makes window click-through: tauriAPI.setClickable(false)
+   • Passes clicks to background applications
+
+ GLASSMORPHISM EFFECT (Background):
+ ─────────────────────────────────────────────────────────────────────────────
+
+ Available but not currently used on buttons (commented out in code):
+   • Class: glass-container
+   • Properties:
+     - Background: rgba(255, 255, 255, 0.5) (semi-transparent white)
+     - Backdrop Filter: blur(10px) brightness(1.2) (blur effect)
+     - Box Shadow: 0 4px 30px rgba(0, 0, 0, 0.1) (soft shadow)
+     - Border: 1px solid rgba(255, 255, 255, 0.2) (light border)
+
+ ================================================================================
+ 6. USER INTERACTION PATTERNS
+ ================================================================================
+
+ TYPICAL USER FLOW:
+
+ SCENARIO 1: View and Dismiss Assistant
+ ─────────────────────────────────────────────────────────────────────────────
+ 1. Application starts → Bird appears in bottom-right corner
+ 2. Window is click-through (passes clicks to other apps)
+ 3. User hovers over bird:
+    → Bird becomes clickable
+    → Control panel fades in from below
+    → Minimize and Close buttons appear
+ 4. User clicks Minimize button:
+    → Bird disappears
+    → Window becomes click-through again
+    → Application continues running in background
+ 5. User can still receive notifications
+
+ SCENARIO 2: Close Application Completely
+ ─────────────────────────────────────────────────────────────────────────────
+ 1. Application starts → Bird appears in bottom-right corner
+ 2. User hovers over bird:
+    → Control panel appears with buttons
+ 3. User clicks Close button:
+    → Application terminates immediately
+    → All windows close
+    → WebSocket connections end
+    → No confirmation dialog (instant action)
+
+ SCENARIO 3: Navigate to Main Application
+ ─────────────────────────────────────────────────────────────────────────────
+ 1. Application starts → Bird appears in bottom-right corner
+ 2. User hovers over bird:
+    → Bird becomes interactive
+    → Control panel appears (optional to use)
+ 3. User clicks on bird image:
+    → Opens browser to main app URL
+    → URL: http://nestdev.sa.corp.samsungelectronics.net:32000/home
+    → Application remains running
+
+ SCENARIO 4: Receive Notification
+ ─────────────────────────────────────────────────────────────────────────────
+ 1. WebSocket receives notification
+ 2. Notification sound plays (nest_bird_sound.wav)
+ 3. Notification card appears with:
+    - jarvis.gif bird avatar (32px)
+    - Title and message text
+    - Clickable to open URL
+ 4. Notification system works independently of bird visibility
+ 5. Notifications can be clicked even if bird is hidden
+
+ ACCESSIBILITY CONSIDERATIONS:
+ ─────────────────────────────────────────────────────────────────────────────
+
+ ✓ Button titles provide tooltips:
+   - Minimize: title="Hide"
+   - Close: title="Close"
+
+ ✓ Keyboard navigation:
+   - Buttons are focusable (tab index)
+   - Enter/Space key triggers click
+
+ ✓ Visual feedback:
+   - Cursor changes to pointer on hover
+   - Hover effects on elements
+   - Smooth animations
+
+ ⚠ Potential improvements:
+   - Add ARIA labels for screen readers
+   - Add focus-visible styles for keyboard users
+   - Consider adding confirmation dialog for close action
+   - Add keyboard shortcuts (Escape to hide, Ctrl+Q to quit)
+
+ DESIGN RATIONALE:
+ ─────────────────────────────────────────────────────────────────────────────
+
+ Why these buttons?
+   • Mimics familiar desktop window controls (macOS-style)
+   • Reduces learning curve for users
+   • Clean, minimal design doesn't distract
+   • Icons are universally understood (- and X)
+
+ Why show on hover only?
+   • Prevents UI clutter
+   • Creates cleaner aesthetic
+   • Follows modern UI patterns
+   • Reduces accidental clicks
+
+ Why click-through window?
+   • Allows user to work with other applications
+   • Bird doesn't block desktop interaction
+   • Only becomes interactive when intentionally hovered
+   • More user-friendly for always-running assistant
+
+ ================================================================================
+ 7. CSS TRANSLATION GUIDE (For Porting to Any Language)
+ ================================================================================
+
+ This section provides detailed CSS specifications for transforming the UI
+ to any programming language or framework. All styles are broken down into
+ their raw CSS properties for easy porting.
+
+ USAGE INSTRUCTIONS:
+ - Copy the CSS code blocks below
+ - Translate to your target language/framework syntax
+ - Maintain the same property values and visual appearance
+ - Adjust syntax-specific syntax (e.g., Flutter, React Native, SwiftUI, etc.)
+
+ ================================================================================
+ 7.1 BUTTON CSS SPECIFICATIONS
+ ================================================================================
+
+ MINIMIZE BUTTON:
+ ─────────────────────────────────────────────────────────────────────────────
+
+ Raw CSS Properties:
+ ```css
+ .minimize-button {
+   /* Container Styles */
+   display: inline-block;
+   position: relative;
+
+   /* Size & Spacing */
+   padding: 4px;
+   font-size: 20px;
+
+   /* Background */
+   background-color: #F9FAFB; /* bg-gray-50 */
+   border: 1px solid #E5E7EB; /* border */
+
+   /* Shape */
+   border-radius: 9999px; /* rounded-full */
+
+   /* Cursor */
+   cursor: pointer;
+
+   /* Position (within control panel) */
+   position: absolute;
+   top: 0;
+   right: 40px; /* gap-2 (8px) + button width */
+ }
+
+ .minimize-button svg {
+   /* SVG Container Size */
+   width: 12px;
+   height: 12px;
+ }
+
+ .minimize-button svg path {
+   /* Icon Drawing */
+   fill: none; /* transparent */
+   stroke: #6B7280; /* medium gray */
+   stroke-width: 1.5px;
+   stroke-linecap: round;
+   stroke-linejoin: round;
+   /* Draw horizontal line from (3,7) to (11,7) */
+   d: path("M3 7L11 7");
+ }
+ ```
+
+ Hover State:
+ ```css
+ .minimize-button:hover {
+   /* Optional: Add hover effect */
+   background-color: #F3F4F6; /* bg-gray-100 */
+   border-color: #D1D5DB; /* border-gray-300 */
+ }
+ ```
+
+ CLOSE BUTTON:
+ ─────────────────────────────────────────────────────────────────────────────
+
+ Raw CSS Properties:
+ ```css
+ .close-button {
+   /* Container Styles */
+   display: inline-block;
+   position: relative;
+
+   /* Size & Spacing */
+   padding: 4px;
+   font-size: 20px;
+
+   /* Background */
+   background-color: #F9FAFB; /* bg-gray-50 */
+   border: 1px solid #E5E7EB; /* border */
+
+   /* Shape */
+   border-radius: 9999px; /* rounded-full */
+
+   /* Cursor */
+   cursor: pointer;
+
+   /* Position (within control panel) */
+   position: absolute;
+   top: 0;
+   right: 0;
+ }
+
+ .close-button svg {
+   /* SVG Container Size */
+   width: 12px;
+   height: 12px;
+ }
+
+ .close-button svg path {
+   /* Icon Drawing */
+   fill: none; /* transparent */
+   stroke: #6B7280; /* medium gray */
+   stroke-width: 1.5px;
+   stroke-linecap: round;
+   stroke-linejoin: round;
+   /* Draw X shape: two diagonal lines */
+   d: path("M10.5 3.5L3.5 10.5M3.5 3.5L10.5 10.5");
+ }
+ ```
+
+ Hover State:
+ ```css
+ .close-button:hover {
+   /* Optional: Add hover effect */
+   background-color: #F3F4F6; /* bg-gray-100 */
+   border-color: #D1D5DB; /* border-gray-300 */
+   stroke: #374151; /* darker gray on hover */
+ }
+ ```
+
+ CONTROL PANEL CONTAINER:
+ ─────────────────────────────────────────────────────────────────────────────
+
+ Raw CSS Properties:
+ ```css
+ .control-panel {
+   /* Positioning */
+   position: absolute;
+   top: 0;
+   right: 0;
+
+   /* Layout */
+   display: flex;
+   align-items: center;
+   justify-content: flex-end;
+   gap: 8px; /* gap-2 */
+
+   /* Visibility States */
+   opacity: 1; /* when visible */
+   animation: fadeInUp 1.5s cubic-bezier(0.34, 1.30, 0.64, 1) forwards;
+ }
+
+ .control-panel.hidden {
+   opacity: 0;
+   display: none;
+ }
+ ```
+
+ ================================================================================
+ 7.2 ANIMATION KEYFRAMES
+ ================================================================================
+
+ FADE IN UP ANIMATION:
+ ─────────────────────────────────────────────────────────────────────────────
+
+ ```css
+ @keyframes fadeInUp {
+   0% {
+     opacity: 0;
+     transform: translateY(20px) scale(0.95);
+   }
+   100% {
+     opacity: 1;
+     transform: translateY(0) scale(1);
+   }
+ }
+ ```
+
+ Animation Configuration:
+ - Duration: 1.5 seconds
+ - Timing Function: cubic-bezier(0.34, 1.30, 0.64, 1)
+   - This creates a slight "bouncy" effect (overshoots slightly)
+ - Fill Mode: forwards (keeps final state)
+ - Initial State: Offset 20px down, scaled to 95%
+ - Final State: Normal position, full size, full opacity
+
+ PULSE ANIMATION:
+ ─────────────────────────────────────────────────────────────────────────────
+
+ ```css
+ @keyframes pulse {
+   0%, 100% {
+     opacity: 1;
+   }
+   50% {
+     opacity: 0.5;
+   }
+ }
+ ```
+
+ Animation Configuration:
+ - Duration: 2 seconds
+ - Timing Function: cubic-bezier(0.4, 0, 0.6, 1)
+ - Iteration Count: infinite
+ - Effect: Opacity fades to 50% and back
+
+ SLIDE IN RIGHT ANIMATION:
+ ─────────────────────────────────────────────────────────────────────────────
+
+ ```css
+ @keyframes slideInRight {
+   0% {
+     opacity: 0;
+     transform: translateX(100px) scale(0.9);
+   }
+   100% {
+     opacity: 1;
+     transform: translateX(0) scale(1);
+   }
+ }
+ ```
+
+ Animation Configuration:
+ - Duration: 1 second
+ - Timing Function: cubic-bezier(0.34, 1.56, 0.64, 1)
+   - More pronounced bounce effect
+ - Initial State: Offset 100px from right, scaled to 90%
+
+ GLASSMORPHISM EFFECT:
+ ─────────────────────────────────────────────────────────────────────────────
+
+ ```css
+ .glass-container {
+   /* Background */
+   background-color: rgba(255, 255, 255, 0.5);
+
+   /* Blur Effect */
+   backdrop-filter: blur(10px) brightness(1.2);
+   -webkit-backdrop-filter: blur(10px) brightness(1.2);
+
+   /* Shadow */
+   box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+
+   /* Border */
+   border: 1px solid rgba(255, 255, 255, 0.2);
+ }
+ ```
+
+ Browser Support Notes:
+ - backdrop-filter: Modern browsers (Chrome 76+, Firefox 103+, Safari 9+)
+ - -webkit-backdrop-filter: Safari prefix for older versions
+ - Fallback: Use solid background with lower opacity for unsupported browsers
+
+ ================================================================================
+ 7.3 BIRD MASCOT CSS SPECIFICATIONS
+ ================================================================================
+
+ MAIN BIRD CONTAINER:
+ ─────────────────────────────────────────────────────────────────────────────
+
+ ```css
+ .bird-container {
+   /* Positioning */
+   position: absolute;
+   right: 4px; /* right-1 */
+   bottom: 4px; /* bottom-1 */
+
+   /* Interactions */
+   pointer-events: auto; /* enables mouse events */
+
+   /* Dimensions (container for bird + buttons) */
+   min-width: 150px;
+   min-height: 150px;
+ }
+
+ .bird-image {
+   /* Size */
+   width: 150px;
+   height: auto;
+
+   /* Cursor */
+   cursor: pointer;
+
+   /* Object Fit */
+   object-fit: contain;
+
+   /* Display */
+   display: block;
+ }
+ ```
+
+ NOTIFICATION BIRD AVATAR:
+ ─────────────────────────────────────────────────────────────────────────────
+
+ ```css
+ .notification-bird-avatar {
+   /* Container */
+   width: 48px; /* w-12 */
+   height: 48px; /* h-12 */
+
+   /* Layout */
+   display: flex;
+   justify-content: center;
+   align-items: center;
+
+   /* Shape */
+   border-radius: 12px; /* rounded-xl */
+
+   /* Background Gradient */
+   background: linear-gradient(135deg, #3B82F6 0%, #9333EA 100%);
+   /* from-blue-500 to-purple-600 */
+
+   /* Shadow */
+   box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+
+   /* Transition */
+   transition: transform 0.3s ease;
+
+   /* Position */
+   position: relative;
+ }
+
+ .notification-bird-avatar:hover {
+   transform: scale(1.1); /* group-hover:scale-110 */
+ }
+
+ .notification-bird-avatar img {
+   /* Size */
+   width: 32px; /* w-8 */
+   height: 32px; /* h-8 */
+
+   /* Object Fit */
+   object-fit: contain;
+
+   /* Position */
+   position: relative;
+   z-index: 10;
+ }
+
+ .notification-bird-avatar::after {
+   /* Highlight overlay */
+   content: '';
+   position: absolute;
+   inset: 0;
+   border-radius: 12px;
+   background-color: rgba(255, 255, 255, 0.2);
+   opacity: 0;
+   transition: opacity 0.3s;
+ }
+
+ .notification-bird-avatar:hover::after {
+   opacity: 1;
+ }
+ ```
+
+ ================================================================================
+ 7.4 COLOR PALETTE
+ ================================================================================
+
+ GRAY SCALE (Tailwind gray-*):
+ ─────────────────────────────────────────────────────────────────────────────
+ gray-50   : #F9FAFB  - Button background
+ gray-100  : #F3F4F6  - Hover background
+ gray-200  : #E5E7EB  - Border color
+ gray-300  : #D1D5DB  - Darker border
+ gray-400  : #9CA3AF  - Medium text
+ gray-500  : #6B7280  - Icon stroke color
+ gray-600  : #4B5563  - Darker text
+ gray-700  : #374151  - Dark text
+ gray-800  : #1F2937  - Very dark text
+ gray-900  : #111827  - Nearly black
+
+ BLUE SCALE (Tailwind blue-*):
+ ─────────────────────────────────────────────────────────────────────────────
+ blue-400  : #60A5FA  - Light blue accent
+ blue-500  : #3B82F6  - Primary blue (gradient start)
+ blue-600  : #2563EB  - Darker blue
+
+ PURPLE SCALE (Tailwind purple-*):
+ ─────────────────────────────────────────────────────────────────────────────
+ purple-500: #8B5CF6  - Purple accent
+ purple-600: #9333EA  - Primary purple (gradient end)
+
+ CUSTOM COLORS:
+ ─────────────────────────────────────────────────────────────────────────────
+ Cyan accent: #00deea  - TechGlanz highlight color
+ Yellow accent: #ffd20e - Accent color (Don't Miss Out!)
+
+ ================================================================================
+ 7.5 NOTIFICATION CARD CSS
+ ================================================================================
+
+ NOTIFICATION CARD:
+ ─────────────────────────────────────────────────────────────────────────────
+
+ ```css
+ .notification-card {
+   /* Dimensions */
+   width: 420px;
+   min-height: 64px;
+
+   /* Positioning */
+   position: relative;
+
+   /* Layout */
+   display: flex;
+   align-items: center;
+
+   /* Spacing */
+   padding: 4px; /* p-1 */
+
+   /* Background & Border */
+   background: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(239, 246, 255, 0.3) 100%);
+   /* bg-gradient-to-br from-white/90 to-blue-50/30 */
+   backdrop-filter: blur(16px) saturate(180%);
+   border: 1px solid rgba(219, 234, 254, 0.3); /* border-blue-100/30 */
+
+   /* Shape */
+   border-radius: 12px; /* rounded-xl */
+
+   /* Shadow */
+   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1),
+               0 2px 4px -1px rgba(0, 0, 0, 0.06);
+
+   /* Cursor */
+   cursor: pointer;
+
+   /* Transition */
+   transition: all 0.3s cubic-bezier(0.34, 1.30, 0.64, 1);
+ }
+
+ .notification-card:hover {
+   /* Hover Effects */
+   background: rgba(255, 255, 255, 0.95);
+   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1),
+               0 10px 10px -5px rgba(0, 0, 0, 0.04);
+   transform: translateY(-2px);
+ }
+
+ .notification-content {
+   /* Content Container */
+   width: 85%; /* w-[85%] */
+   display: flex;
+   align-items: center;
+   gap: 12px; /* gap-3 */
+   padding: 8px; /* p-2 */
+ }
+
+ .notification-text {
+   /* Text Container */
+   display: flex;
+   flex-direction: column;
+   align-items: flex-start;
+   text-align: left;
+ }
+
+ .notification-title {
+   /* Title Styles */
+   font-size: 16px; /* text-[16px] */
+   font-weight: 600; /* font-semibold */
+
+   /* Text Truncation */
+   overflow: hidden;
+   display: -webkit-box;
+   -webkit-box-orient: vertical;
+   -webkit-line-clamp: 1;
+   line-clamp: 1;
+ }
+
+ .notification-message {
+   /* Message Styles */
+   font-size: 12px; /* text-[12px] */
+   font-weight: 400; /* font-normal */
+   color: #6B7280; /* gray-500 */
+
+   /* Text Truncation */
+   overflow: hidden;
+   display: -webkit-box;
+   -webkit-box-orient: vertical;
+   -webkit-line-clamp: 1;
+   line-clamp: 1;
+ }
+ ```
+
+ ================================================================================
+ 7.6 GRADIENT TEXT STYLES
+ ================================================================================
+
+ RADIAL GRADIENT TEXT:
+ ─────────────────────────────────────────────────────────────────────────────
+
+ ```css
+ .radial-text-gradient {
+   /* Text Gradient */
+   background: radial-gradient(
+     circle farthest-corner at center center,
+     rgb(28, 56, 212) 17.8%,
+     rgb(45, 187, 243) 100.2%
+   );
+
+   /* Clip to Text */
+   -webkit-background-clip: text;
+   background-clip: text;
+
+   /* Make Text Transparent */
+   color: transparent;
+
+   /* Fallback */
+   color: #1c38d4;
+ }
+ ```
+
+ Gradient Coordinates:
+ - Shape: circle farthest-corner
+ - Position: center center
+ - Color Stop 1: rgb(28, 56, 212) at 17.8% (dark blue)
+ - Color Stop 2: rgb(45, 187, 243) at 100.2% (light blue)
+ - Fallback Color: #1c38d4 (for browsers that don't support text gradient)
+
+ ================================================================================
+ 7.7 LINE CLAMP (Text Truncation)
+ ================================================================================
+
+ ```css
+ .line-clamp-1 {
+   overflow: hidden;
+   display: -webkit-box;
+   -webkit-box-orient: vertical;
+   -webkit-line-clamp: 1;
+   line-clamp: 1;
+ }
+
+ .line-clamp-2 {
+   overflow: hidden;
+   display: -webkit-box;
+   -webkit-box-orient: vertical;
+   -webkit-line-clamp: 2;
+   line-clamp: 2;
+ }
+
+ .line-clamp-3 {
+   overflow: hidden;
+   display: -webkit-box;
+   -webkit-box-orient: vertical;
+   -webkit-line-clamp: 3;
+   line-clamp: 3;
+ }
+ ```
+
+ Browser Support:
+ - -webkit-line-clamp: Chrome, Safari, Edge
+ - line-clamp: Firefox 68+
+ - Fallback: Use text-overflow: ellipsis for single line truncation
+
+ ================================================================================
+ 7.8 CUSTOM SCROLLBAR
+ ================================================================================
+
+ ```css
+ .hide-scrollbar {
+   /* Hide scrollbar for IE and Edge */
+   -ms-overflow-style: none;
+
+   /* Hide scrollbar for Firefox */
+   scrollbar-width: none;
+ }
+
+ /* Hide scrollbar for Chrome, Safari and Opera */
+ .hide-scrollbar::-webkit-scrollbar {
+   display: none;
+ }
+
+ /* Custom scrollbar for notification content */
+ .notification-scrollbar::-webkit-scrollbar {
+   width: 4px;
+ }
+
+ .notification-scrollbar::-webkit-scrollbar-track {
+   background: transparent;
+ }
+
+ .notification-scrollbar::-webkit-scrollbar-thumb {
+   background: rgba(156, 163, 175, 0.5);
+   border-radius: 2px;
+ }
+
+ .notification-scrollbar::-webkit-scrollbar-thumb:hover {
+   background: rgba(156, 163, 175, 0.7);
+ }
+ ```
+
+ ================================================================================
+ 7.9 TRANSITION UTILITIES
+ ================================================================================
+
+ ```css
+ .notification-enter {
+   opacity: 0;
+   transform: translateX(100px) scale(0.9);
+ }
+
+ .notification-enter-active {
+   opacity: 1;
+   transform: translateX(0) scale(1);
+   transition: all 1s cubic-bezier(0.34, 1.56, 0.64, 1);
+ }
+
+ .notification-exit {
+   opacity: 1;
+   transform: translateX(0) scale(1);
+ }
+
+ .notification-exit-active {
+   opacity: 0;
+   transform: translateX(100px) scale(0.9);
+   transition: all 1s ease-in;
+ }
+ ```
+
+ ================================================================================
+ 7.10 FONTS
+ ================================================================================
+
+ ```css
+ /* Custom font imports */
+ @import url('https://fonts.googleapis.com/css2?family=Courgette&display=swap');
+
+ /* Font family usage */
+ .font-courgette {
+   font-family: 'Courgette', cursive;
+ }
+ ```
+
+ ================================================================================
+ 7.11 TAILWIND CSS MAPPING
+ ================================================================================
+
+ This section maps Tailwind CSS classes to raw CSS properties:
+
+ COLORS:
+ - bg-gray-50      → background-color: #F9FAFB
+ - bg-white/50     → background-color: rgba(255, 255, 255, 0.5)
+ - border-gray-200 → border-color: #E5E7EB
+ - text-gray-500   → color: #6B7280
+
+ SPACING:
+ - p-[1px]         → padding: 1px
+ - gap-2           → gap: 8px
+ - gap-3           → gap: 12px
+
+ BORDER RADIUS:
+ - rounded-full    → border-radius: 9999px
+ - rounded-xl      → border-radius: 12px
+
+ DISPLAY & POSITION:
+ - absolute        → position: absolute
+ - top-0           → top: 0
+ - right-0         → right: 0
+ - bottom-0        → bottom: 0
+ - flex            → display: flex
+ - items-center    → align-items: center
+ - justify-center  → justify-content: center
+
+ OPACITY:
+ - opacity-0       → opacity: 0
+ - opacity-100     → opacity: 1
+ - opacity-0/0     → opacity: 0 (utility class)
+
+ TRANSFORMS:
+ - scale-95        → transform: scale(0.95)
+ - scale-110       → transform: scale(1.1)
+ - translate-y-20  → transform: translateY(20px)
+
+ SIZE:
+ - w-12            → width: 48px (1 unit = 4px in Tailwind default)
+ - h-12            → height: 48px
+ - w-[150px]       → width: 150px (arbitrary value)
+ - w-[85%]         → width: 85%
+
+ SHADOW:
+ - shadow-lg       → box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1)
+ - shadow-3xl      → box-shadow: 0 35px 60px -15px rgba(0, 0, 0, 0.3)
+
+ CURSOR:
+ - cursor-pointer  → cursor: pointer
+
+ Z-INDEX:
+ - z-10            → z-index: 10
+ - z-20            → z-index: 20
+
+ ================================================================================
+ 8. FRAMEWORK-SPECIFIC EXAMPLES
+ ================================================================================
+
+ This section provides examples for porting to different frameworks:
+
+ FLUTTER (Dart):
+ ─────────────────────────────────────────────────────────────────────────────
+
+ ```dart
+ // Minimize Button
+ Container(
+   decoration: BoxDecoration(
+     color: Color(0xFFF9FAFB),
+     border: Border.all(color: Color(0xFFE5E7EB)),
+     shape: BoxShape.circle,
+   ),
+   child: IconButton(
+     icon: Icon(Icons.remove, size: 12),
+     color: Color(0xFF6B7280),
+     onPressed: () => handleCloseBird(true),
+   ),
+ )
+
+ // Animation Controller
+ class FadeInUpAnimation extends StatefulWidget {
+   @override
+   _FadeInUpAnimationState createState() => _FadeInUpAnimationState();
+ }
+
+ class _FadeInUpAnimationState extends State<FadeInUpAnimation>
+     with SingleTickerProviderStateMixin {
+   late AnimationController _controller;
+   late Animation<double> _animation;
+
+   @override
+   void initState() {
+     super.initState();
+     _controller = AnimationController(
+       duration: Duration(milliseconds: 1500),
+       vsync: this,
+     );
+     _animation = CurvedAnimation(
+       parent: _controller,
+       curve: Cubic(0.34, 1.30, 0.64, 1),
+     );
+     _controller.forward();
+   }
+
+   @override
+   Widget build(BuildContext context) {
+     return FadeTransition(
+       opacity: _animation,
+       child: SlideTransition(
+         position: Tween<Offset>(
+           begin: Offset(0, 0.05),
+           end: Offset.zero,
+         ).animate(_animation),
+         child: widget.child,
+       ),
+     );
+   }
+ }
+ ```
+
+ REACT NATIVE (JavaScript/TypeScript):
+ ─────────────────────────────────────────────────────────────────────────────
+
+ ```javascript
+ import { View, TouchableOpacity, Animated, Easing } from 'react-native';
+ import Svg, { Path } from 'react-native-svg';
+
+ // Minimize Button
+ const MinimizeButton = ({ onPress }) => (
+   <TouchableOpacity onPress={onPress}>
+     <View style={{
+       width: 40,
+       height: 40,
+       borderRadius: 20,
+       backgroundColor: '#F9FAFB',
+       borderWidth: 1,
+       borderColor: '#E5E7EB',
+       alignItems: 'center',
+       justifyContent: 'center',
+     }}>
+       <Svg width={12} height={12} viewBox="0 0 14 14">
+         <Path
+           d="M3 7L11 7"
+           stroke="#6B7280"
+           strokeWidth="1.5"
+           strokeLinecap="round"
+           strokeLinejoin="round"
+         />
+       </Svg>
+     </View>
+   </TouchableOpacity>
+ );
+
+ // Fade In Up Animation
+ const FadeInUp = ({ children, visible }) => {
+   const fadeAnim = useRef(new Animated.Value(0)).current;
+   const slideAnim = useRef(new Animated.Value(20)).current;
+
+   useEffect(() => {
+     if (visible) {
+       Animated.parallel([
+         Animated.timing(fadeAnim, {
+           toValue: 1,
+           duration: 1500,
+           easing: Easing.bezier(0.34, 1.30, 0.64, 1),
+           useNativeDriver: true,
+         }),
+         Animated.timing(slideAnim, {
+           toValue: 0,
+           duration: 1500,
+           easing: Easing.bezier(0.34, 1.30, 0.64, 1),
+           useNativeDriver: true,
+         }),
+       ]).start();
+     }
+   }, [visible]);
+
+   return (
+     <Animated.View
+       style={{
+         opacity: fadeAnim,
+         transform: [{ translateY: slideAnim }],
+       }}
+     >
+       {children}
+     </Animated.View>
+   );
+ };
+ ```
+
+ SWIFTUI (Swift):
+ ─────────────────────────────────────────────────────────────────────────────
+
+ ```swift
+ // Minimize Button
+ struct MinimizeButton: View {
+     let action: () -> Void
+
+     var body: some View {
+         Button(action: action) {
+             ZStack {
+                 Circle()
+                     .fill(Color(hex: 0xF9FAFB))
+                     .frame(width: 40, height: 40)
+                     .overlay(
+                         Circle()
+                             .stroke(Color(hex: 0xE5E7EB), lineWidth: 1)
+                     )
+
+                 Image(systemName: "minus")
+                     .font(.system(size: 12))
+                     .foregroundColor(Color(hex: 0x6B7280))
+             }
+         }
+     }
+ }
+
+ // Fade In Up Animation
+ struct FadeInUp: ViewModifier {
+     @State private var opacity: Double = 0
+     @State private var offset: CGFloat = 20
+
+     func body(content: Content) -> some View {
+         content
+             .opacity(opacity)
+             .offset(y: offset)
+             .onAppear {
+                 withAnimation(.easeInOut(duration: 1.5)) {
+                     opacity = 1
+                     offset = 0
+                 }
+             }
+     }
+ }
+
+ extension View {
+     func fadeInUp() -> some View {
+         self.modifier(FadeInUp())
+     }
+ }
+ ```
+
+ PYTHON (Tkinter/PyQt):
+ ─────────────────────────────────────────────────────────────────────────────
+
+ ```python
+ # PyQt5 Example
+ from PyQt5.QtWidgets import QPushButton, QFrame
+ from PyQt5.QtCore import Qt, QPropertyAnimation, QEasingCurve
+ from PyQt5.QtGui import QPainter, QColor, QPen, QIcon
+
+ class MinimizeButton(QPushButton):
+     def __init__(self, parent=None):
+         super().__init__(parent)
+         self.setFixedSize(40, 40)
+         self.setCursor(Qt.PointingHandCursor)
+
+     def paintEvent(self, event):
+         painter = QPainter(self)
+         painter.setRenderHint(QPainter.Antialiasing)
+
+         # Draw circle background
+         painter.setBrush(QColor('#F9FAFB'))
+         painter.setPen(QPen(QColor('#E5E7EB'), 1))
+         painter.drawEllipse(0, 0, 39, 39)
+
+         # Draw minus icon
+         painter.setPen(QPen(QColor('#6B7280'), 1.5))
+         painter.setCapStyle(Qt.RoundCap)
+         painter.drawLine(3, 20, 37, 20)
+
+ # Fade In Up Animation
+ def animate_fade_in_up(widget):
+     """Create fade in up animation for widget"""
+
+     # Opacity animation
+     opacity_anim = QPropertyAnimation(widget, b"windowOpacity")
+     opacity_anim.setDuration(1500)
+     opacity_anim.setStartValue(0.0)
+     opacity_anim.setEndValue(1.0)
+     opacity_anim.setEasingCurve(QEasingCurve.BezierSpline)
+
+     # Position animation
+     pos_anim = QPropertyAnimation(widget, b"pos")
+     pos_anim.setDuration(1500)
+     pos_anim.setStartValue(widget.pos() + QPoint(0, 20))
+     pos_anim.setEndValue(widget.pos())
+     pos_anim.setEasingCurve(QEasingCurve.BezierSpline)
+
+     # Start animations
+     opacity_anim.start()
+     pos_anim.start()
+ ```
+
+ JAVA (Swing/JavaFX):
+ ─────────────────────────────────────────────────────────────────────────────
+
+ ```java
+ // JavaFX Example
+ import javafx.animation.*;
+ import javafx.scene.control.Button;
+ import javafx.scene.paint.Color;
+ import javafx.scene.shape.*;
+ import javafx.scene.layout.StackPane;
+ import javafx.util.Duration;
+
+ public class MinimizeButton extends Button {
+     public MinimizeButton(Runnable action) {
+         // Create circular background
+         Circle background = new Circle(20, Color.web("#F9FAFB"));
+         background.setStroke(Color.web("#E5E7EB"));
+         background.setStrokeWidth(1);
+
+         // Create minus icon
+         Line minus = new Line(3, 20, 37, 20);
+         minus.setStroke(Color.web("#6B7280"));
+         minus.setStrokeWidth(1.5);
+         minus.setStrokeLineCap(StrokeLineCap.ROUND);
+
+         // Create button
+         StackPane pane = new StackPane(background, minus);
+         this.setGraphic(pane);
+         this.setOnAction(e -> action.run());
+     }
+ }
+
+ // Fade In Up Animation
+ public static void animateFadeInUp(Node node) {
+     // Opacity fade in
+     FadeTransition fade = new FadeTransition(Duration.millis(1500), node);
+     fade.setFromValue(0.0);
+     fade.setToValue(1.0);
+
+     // Translate up
+     TranslateTransition slide = new TranslateTransition(Duration.millis(1500), node);
+     slide.setFromY(20);
+     slide.setToY(0);
+
+     // Create parallel animation with easing
+     Interpolator easing = Interpolator.SPLINE(0.34, 1.30, 0.64, 1.0);
+     fade.setInterpolator(easing);
+     slide.setInterpolator(easing);
+
+     // Play both animations together
+     ParallelTransition parallel = new ParallelTransition(fade, slide);
+     parallel.play();
+ }
+ ```
+
+ ================================================================================
+ END OF DOCUMENTATION
+ ================================================================================
+
+ For questions or updates, contact the development team.
+
+ This CSS Translation Guide provides all necessary specifications to port the
+ UI to any programming language or framework. Copy the appropriate CSS blocks
+ and translate them to your target language's syntax while maintaining the same
+ visual appearance and behavior.
+

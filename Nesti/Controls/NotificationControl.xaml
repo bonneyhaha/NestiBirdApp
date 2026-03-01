@@ -2,46 +2,54 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:gif="http://wpfanimatedgif.codeplex.com"
-             Width="380"
+             Width="420"
              Margin="0,0,0,8">
 
-    <!-- Slide transform driven from code-behind -->
     <UserControl.RenderTransform>
-        <TranslateTransform x:Name="SlideTransform" />
+        <TransformGroup>
+            <ScaleTransform x:Name="CardScale"
+                            ScaleX="1" ScaleY="1"
+                            CenterX="210" CenterY="36" />
+            <TranslateTransform x:Name="SlideTransform" />
+        </TransformGroup>
     </UserControl.RenderTransform>
 
-    <!-- Glassmorphism card -->
     <Border x:Name="Card"
-            Background="#CCFFFFFF"
-            BorderBrush="#40FFFFFF"
             BorderThickness="1"
-            CornerRadius="14"
-            Padding="12"
+            CornerRadius="12"
+            Padding="4"
             Cursor="Hand"
-            MouseLeftButtonDown="Card_Click"
-            MouseEnter="Card_MouseEnter"
-            MouseLeave="Card_MouseLeave">
+            MouseLeftButtonDown="Card_Click">
+
+        <Border.Background>
+            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Color="#E6FFFFFF" Offset="0" />
+                <GradientStop Color="#4DEFF6FF" Offset="1" />
+            </LinearGradientBrush>
+        </Border.Background>
+
+        <Border.BorderBrush>
+            <SolidColorBrush Color="#4DDBEAFE" />
+        </Border.BorderBrush>
 
         <Border.Effect>
             <DropShadowEffect Color="#000000"
-                              Opacity="0.12"
-                              BlurRadius="12"
+                              Opacity="0.10"
+                              BlurRadius="8"
                               ShadowDepth="3"
                               Direction="270" />
         </Border.Effect>
 
-        <Grid>
+        <Grid Margin="8">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="52" />   <!-- Col 0: bird icon          -->
-                <ColumnDefinition Width="*" />    <!-- Col 1: title + message    -->
-                <ColumnDefinition Width="28" />   <!-- Col 2: snooze button      -->
-                <ColumnDefinition Width="28" />   <!-- Col 3: dismiss button     -->
+                <ColumnDefinition Width="52" />
+                <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <!-- Bird icon with gradient background -->
+            <!-- Bird avatar -->
             <Border Grid.Column="0"
-                    Width="44" Height="44"
-                    CornerRadius="10"
+                    Width="48" Height="48"
+                    CornerRadius="12"
                     VerticalAlignment="Center">
                 <Border.Background>
                     <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
@@ -49,73 +57,83 @@
                         <GradientStop Color="#9333EA" Offset="1" />
                     </LinearGradientBrush>
                 </Border.Background>
+                <Border.Effect>
+                    <DropShadowEffect Color="#000000"
+                                      Opacity="0.10"
+                                      BlurRadius="12"
+                                      ShadowDepth="4"
+                                      Direction="270" />
+                </Border.Effect>
                 <Image gif:ImageBehavior.AnimatedSource="pack://application:,,,/assets/jarvis.gif"
                        gif:ImageBehavior.RepeatBehavior="Forever"
                        Width="32" Height="32"
                        Stretch="Uniform" />
             </Border>
 
-            <!-- Title + message -->
-            <StackPanel Grid.Column="1"
-                        VerticalAlignment="Center"
-                        Margin="10,0,4,0">
-                <TextBlock x:Name="TitleBlock"
-                           FontSize="13"
-                           FontWeight="SemiBold"
-                           Foreground="#1F2937"
-                           TextTrimming="CharacterEllipsis" />
-                <TextBlock x:Name="MessageBlock"
-                           FontSize="11"
-                           Foreground="#6B7280"
-                           TextWrapping="Wrap"
-                           MaxHeight="38"
-                           Margin="0,3,0,0"
-                           TextTrimming="CharacterEllipsis" />
-            </StackPanel>
+            <!--
+                Content column — single Grid cell shared by text and action buttons.
+                Text is vertically centered; buttons are overlaid at the top-right corner
+                using alignment only. Everything is one hit-test region, fixing the hover
+                and click detection issues caused by separate fixed-width button columns.
+                Buttons use Border (not Button) so MouseLeftButtonDown is owned directly:
+                  e.Handled=true  → stops event bubbling to Card_Click
+                  CaptureMouse()  → guarantees MouseLeftButtonUp fires on this element
+                                    even if the cursor moves between press and release
+            -->
+            <Grid Grid.Column="1" Margin="12,0,4,0">
 
-            <!-- Snooze button (col 2) -->
-            <Button x:Name="SnoozeBtn"
-                    Grid.Column="2"
-                    Width="24" Height="24"
-                    VerticalAlignment="Top"
-                    HorizontalAlignment="Center"
-                    Background="Transparent"
-                    BorderThickness="0"
-                    Cursor="Hand"
-                    Opacity="0"
-                    ToolTip="Snooze"
-                    Click="Snooze_Click">
-                <Button.Template>
-                    <ControlTemplate TargetType="Button">
+                <!-- Title + message -->
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock x:Name="TitleBlock"
+                               FontSize="16"
+                               FontWeight="SemiBold"
+                               Foreground="#1F2937"
+                               TextTrimming="CharacterEllipsis"
+                               Margin="0,0,56,0" />
+                    <TextBlock x:Name="MessageBlock"
+                               FontSize="12"
+                               FontWeight="Normal"
+                               Foreground="#6B7280"
+                               TextWrapping="Wrap"
+                               MaxHeight="36"
+                               Margin="0,2,56,0"
+                               TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+
+                <!-- Action buttons — always visible, overlaid top-right -->
+                <StackPanel Orientation="Horizontal"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Top">
+
+                    <Border x:Name="SnoozeBtn"
+                            Width="24" Height="24"
+                            Background="Transparent"
+                            Cursor="Hand"
+                            ToolTip="Snooze"
+                            MouseLeftButtonDown="Snooze_MouseDown"
+                            MouseLeftButtonUp="Snooze_MouseUp">
                         <Image Source="pack://application:,,,/assets/snooze_icon.png"
                                Width="22" Height="22"
                                Stretch="Uniform"
                                RenderOptions.BitmapScalingMode="HighQuality" />
-                    </ControlTemplate>
-                </Button.Template>
-            </Button>
+                    </Border>
 
-            <!-- Dismiss button (col 3) -->
-            <Button x:Name="DismissBtn"
-                    Grid.Column="3"
-                    Width="24" Height="24"
-                    VerticalAlignment="Top"
-                    HorizontalAlignment="Center"
-                    Background="Transparent"
-                    BorderThickness="0"
-                    Cursor="Hand"
-                    Opacity="0"
-                    ToolTip="Dismiss"
-                    Click="Dismiss_Click">
-                <Button.Template>
-                    <ControlTemplate TargetType="Button">
+                    <Border x:Name="DismissBtn"
+                            Width="24" Height="24"
+                            Background="Transparent"
+                            Cursor="Hand"
+                            Margin="4,0,0,0"
+                            ToolTip="Dismiss"
+                            MouseLeftButtonDown="Dismiss_MouseDown"
+                            MouseLeftButtonUp="Dismiss_MouseUp">
                         <Image Source="pack://application:,,,/assets/cross_button_notif_icon.png"
                                Width="22" Height="22"
                                Stretch="Uniform"
                                RenderOptions.BitmapScalingMode="HighQuality" />
-                    </ControlTemplate>
-                </Button.Template>
-            </Button>
+                    </Border>
+
+                </StackPanel>
+            </Grid>
 
         </Grid>
     </Border>

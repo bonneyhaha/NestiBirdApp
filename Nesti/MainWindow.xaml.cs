@@ -13,10 +13,19 @@ namespace Nesti;
 
 public partial class MainWindow : Window
 {
-    // ── Win32 hit-test constants ──────────────────────────────────────────────
-    private const int WM_NCHITTEST  = 0x0084;
-    private const int HTTRANSPARENT = -1;
-    private const int HTCLIENT      =  1;
+    // ── Win32 constants + P/Invoke ────────────────────────────────────────────
+    private const int WM_NCHITTEST     = 0x0084;
+    private const int HTTRANSPARENT    = -1;
+    private const int HTCLIENT         =  1;
+    private const int GWL_EXSTYLE      = -20;
+    private const int WS_EX_TOOLWINDOW = 0x00000080;  // exclude from Alt+Tab / taskbar
+    private const int WS_EX_APPWINDOW  = 0x00040000;  // force taskbar presence (we clear this)
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern int GetWindowLong(IntPtr hwnd, int index);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern int SetWindowLong(IntPtr hwnd, int index, int value);
 
     // ── Services ──────────────────────────────────────────────────────────────
     private IWebSocketSource? _ws;                          // set in Window_Loaded
@@ -79,7 +88,13 @@ public partial class MainWindow : Window
 
     private void InstallWndProcHook()
     {
-        var hwnd   = new WindowInteropHelper(this).Handle;
+        var hwnd = new WindowInteropHelper(this).Handle;
+
+        // Reliably hide from Alt+Tab and the taskbar on Windows 10/11.
+        // ShowInTaskbar="False" alone is not sufficient for WindowStyle="None" windows.
+        int ex = GetWindowLong(hwnd, GWL_EXSTYLE);
+        SetWindowLong(hwnd, GWL_EXSTYLE, (ex | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW);
+
         var source = HwndSource.FromHwnd(hwnd);
         source?.AddHook(WndProc);
     }
@@ -123,24 +138,42 @@ public partial class MainWindow : Window
     {
         try
         {
-            var tl   = el.PointToScreen(new Point(0, 0));
-            var rect = new Rect(tl, new Size(el.ActualWidth, el.ActualHeight));
-            return rect.Contains(screen);
+            // Use PointToScreen for BOTH corners so the rect is in physical pixels,
+            // matching the WM_NCHITTEST lParam. Using new Size(ActualWidth, ActualHeight)
+            // is wrong on DPI > 100% because ActualWidth is in DIPs, causing the right
+            // portion of the element (where the action buttons live) to be excluded.
+            var tl = el.PointToScreen(new Point(0, 0));
+            var br = el.PointToScreen(new Point(el.ActualWidth, el.ActualHeight));
+            return new Rect(tl, br).Contains(screen);
         }
         catch { return false; }
     }
 
     // ── Bird hover ────────────────────────────────────────────────────────────
+    private DispatcherTimer? _hideControlsTimer;
+
     private void BirdContainer_MouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
     {
+        _hideControlsTimer?.Stop();
         ControlButtons.Visibility = Visibility.Visible;
         ShowGreeting();
     }
 
     private void BirdContainer_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
     {
-        ControlButtons.Visibility = Visibility.Collapsed;
-        HideGreeting();
+        // Delay collapse so the buttons stay visible for ~1.2 s after the cursor leaves.
+        // This prevents them from vanishing the instant the user moves slightly off the bird.
+        _hideControlsTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(1200)
+        };
+        _hideControlsTimer.Tick += (_, _) =>
+        {
+            _hideControlsTimer!.Stop();
+            ControlButtons.Visibility = Visibility.Collapsed;
+            HideGreeting();
+        };
+        _hideControlsTimer.Start();
     }
 
     private void ShowGreeting()

@@ -27,7 +27,7 @@ public partial class NotificationControl : UserControl
 
     public void SetData(string notificationId, string title, string body, string? url)
     {
-        NotificationId  = notificationId;
+        NotificationId    = notificationId;
         TitleBlock.Text   = title;
         MessageBlock.Text = body;
         NotificationUrl   = url;
@@ -36,66 +36,91 @@ public partial class NotificationControl : UserControl
     // ── Animations ────────────────────────────────────────────────────────────
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        // Slide in from the right
-        var slide = new DoubleAnimation(400, 0, new Duration(TimeSpan.FromMilliseconds(350)))
-        {
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-        };
-        SlideTransform.BeginAnimation(TranslateTransform.XProperty, slide);
+        var dur  = new Duration(TimeSpan.FromMilliseconds(1000));
+        var ease = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.4 };
 
-        var fade = new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(250)));
+        var slide  = new DoubleAnimation(400, 0, dur) { EasingFunction = ease };
+        var scaleX = new DoubleAnimation(0.9, 1, dur) { EasingFunction = ease };
+        var scaleY = new DoubleAnimation(0.9, 1, dur) { EasingFunction = ease };
+
+        SlideTransform.BeginAnimation(TranslateTransform.XProperty, slide);
+        CardScale.BeginAnimation(ScaleTransform.ScaleXProperty, scaleX);
+        CardScale.BeginAnimation(ScaleTransform.ScaleYProperty, scaleY);
+
+        var fade = new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(400)));
         BeginAnimation(OpacityProperty, fade);
     }
 
-    /// <summary>Animates the card out to the right, then calls <paramref name="onComplete"/>.</summary>
     public void AnimateOut(Action? onComplete = null)
     {
-        var slide = new DoubleAnimation(0, 400, new Duration(TimeSpan.FromMilliseconds(300)))
-        {
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
-        };
-        var fade = new DoubleAnimation(1, 0, new Duration(TimeSpan.FromMilliseconds(300)));
+        var dur  = new Duration(TimeSpan.FromMilliseconds(500));
+        var ease = new CubicEase { EasingMode = EasingMode.EaseIn };
+
+        var slide  = new DoubleAnimation(0, 400, dur) { EasingFunction = ease };
+        var scaleX = new DoubleAnimation(1, 0.9, dur);
+        var scaleY = new DoubleAnimation(1, 0.9, dur);
+        var fade   = new DoubleAnimation(1, 0, dur);
         fade.Completed += (_, _) => onComplete?.Invoke();
 
         SlideTransform.BeginAnimation(TranslateTransform.XProperty, slide);
+        CardScale.BeginAnimation(ScaleTransform.ScaleXProperty, scaleX);
+        CardScale.BeginAnimation(ScaleTransform.ScaleYProperty, scaleY);
         BeginAnimation(OpacityProperty, fade);
     }
 
     // ── Event handlers ────────────────────────────────────────────────────────
+
+    // Card body click — opens URL, marks as read, then animates the card out.
+    // SnoozeBtn/DismissBtn capture the mouse on MouseDown and set e.Handled=true,
+    // so this handler is never reached when an action button is clicked.
     private void Card_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (!string.IsNullOrEmpty(NotificationUrl))
             OpenUrl(NotificationUrl);
-    }
 
-    private async void Snooze_Click(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
         if (!string.IsNullOrEmpty(NotificationId))
-            await NotificationApiService.SnoozeAsync(NotificationId);
-
-        SnoozeRequested?.Invoke(this, EventArgs.Empty);
-    }
-
-    private async void Dismiss_Click(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        if (!string.IsNullOrEmpty(NotificationId))
-            await NotificationApiService.MarkAsReadAsync(NotificationId);
+            _ = NotificationApiService.MarkAsReadAsync(NotificationId); // fire-and-forget
 
         DismissRequested?.Invoke(this, EventArgs.Empty);
     }
 
-    private void Card_MouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
+    // Snooze — MouseDown stops bubbling to Card_Click and captures the mouse so
+    // MouseUp is guaranteed to fire on this element even if the cursor drifts.
+    private void Snooze_MouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        SnoozeBtn.Opacity  = 0.75;
-        DismissBtn.Opacity = 0.75;
+        e.Handled = true;
+        (sender as System.Windows.UIElement)?.CaptureMouse();
     }
 
-    private void Card_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
+    // Snooze — MouseUp calls the snooze API (fire-and-forget) and raises the event.
+    private void Snooze_MouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        SnoozeBtn.Opacity  = 0;
-        DismissBtn.Opacity = 0;
+        e.Handled = true;
+        (sender as System.Windows.UIElement)?.ReleaseMouseCapture();
+
+        if (!string.IsNullOrEmpty(NotificationId))
+            _ = NotificationApiService.SnoozeAsync(NotificationId);   // fire-and-forget
+
+        SnoozeRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    // Dismiss — MouseDown stops bubbling and captures the mouse.
+    private void Dismiss_MouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        (sender as System.Windows.UIElement)?.CaptureMouse();
+    }
+
+    // Dismiss — MouseUp marks as read (fire-and-forget) and raises the event.
+    private void Dismiss_MouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        (sender as System.Windows.UIElement)?.ReleaseMouseCapture();
+
+        if (!string.IsNullOrEmpty(NotificationId))
+            _ = NotificationApiService.MarkAsReadAsync(NotificationId); // fire-and-forget
+
+        DismissRequested?.Invoke(this, EventArgs.Empty);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

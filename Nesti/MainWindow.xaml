@@ -29,11 +29,12 @@
     <Grid Background="Transparent">
 
         <!-- ── Notification stack ── -->
+        <!-- Width matches NotificationControl.xaml (420) + panel margin -->
         <StackPanel x:Name="NotificationsPanel"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Bottom"
                     Margin="0,0,5,200"
-                    Width="390" />
+                    Width="425" />
 
         <!-- ── Bird zone ── -->
         <Grid x:Name="BirdContainer"
@@ -50,7 +51,18 @@
                 <RowDefinition Height="*" />    <!-- Row 1: bird GIF        -->
             </Grid.RowDefinitions>
 
-            <!-- ── Row 0: control buttons (PNG icons, always within bounds) ── -->
+            <!--
+                ── Row 0: control buttons ──
+                Styled exactly per ui.txt §7.1 (Button CSS Specifications):
+                  • Background : #F9FAFB  (bg-gray-50)
+                  • Border     : 1px solid #E5E7EB
+                  • Shape      : rounded-full  (CornerRadius="9999")
+                  • Padding    : 4px  (p-[1px] → 4px per CSS spec)
+                  • SVG icons  : 12×12 displayed in a 14×14 viewBox
+                  • Hover bg   : #F3F4F6  (bg-gray-100)
+                  • Hover border: #D1D5DB (border-gray-300)
+                  • Stroke     : #6B7280, 1.5px, round line-caps
+            -->
             <StackPanel x:Name="ControlButtons"
                         Grid.Row="0"
                         HorizontalAlignment="Right"
@@ -59,9 +71,8 @@
                         Margin="0,0,4,0"
                         Visibility="Collapsed">
 
-                <!-- Minimize button -->
-                <Button Width="28" Height="28"
-                        Margin="0,0,6,0"
+                <!-- Minimize / Hide button — SVG dash icon (M3,7 L11,7) -->
+                <Button Margin="0,0,6,0"
                         Background="Transparent"
                         BorderThickness="0"
                         Cursor="Hand"
@@ -69,37 +80,73 @@
                         Click="HideButton_Click">
                     <Button.Template>
                         <ControlTemplate TargetType="Button">
-                            <Image Source="pack://application:,,,/assets/minimize_button_icon.png"
-                                   Width="26" Height="26"
-                                   Stretch="Uniform"
-                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                            <Border x:Name="Bd"
+                                    Background="#F9FAFB"
+                                    BorderBrush="#E5E7EB"
+                                    BorderThickness="1"
+                                    CornerRadius="9999"
+                                    Padding="4">
+                                <!-- Viewbox scales the 14×14 SVG coordinate space to 12×12 display -->
+                                <Viewbox Width="12" Height="12">
+                                    <Canvas Width="14" Height="14">
+                                        <Path Data="M3,7 L11,7"
+                                              Stroke="#6B7280"
+                                              StrokeThickness="1.5"
+                                              StrokeStartLineCap="Round"
+                                              StrokeEndLineCap="Round" />
+                                    </Canvas>
+                                </Viewbox>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bd" Property="Background"   Value="#F3F4F6" />
+                                    <Setter TargetName="Bd" Property="BorderBrush"  Value="#D1D5DB" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
                         </ControlTemplate>
                     </Button.Template>
                 </Button>
 
-                <!-- Close / exit button -->
-                <Button Width="28" Height="28"
-                        Background="Transparent"
+                <!-- Close / exit button — SVG X icon (M10.5,3.5 L3.5,10.5 M3.5,3.5 L10.5,10.5) -->
+                <Button Background="Transparent"
                         BorderThickness="0"
                         Cursor="Hand"
                         ToolTip="Close Nesti"
                         Click="CloseButton_Click">
                     <Button.Template>
                         <ControlTemplate TargetType="Button">
-                            <Image Source="pack://application:,,,/assets/cross_button_notif.png"
-                                   Width="26" Height="26"
-                                   Stretch="Uniform"
-                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                            <Border x:Name="Bd"
+                                    Background="#F9FAFB"
+                                    BorderBrush="#E5E7EB"
+                                    BorderThickness="1"
+                                    CornerRadius="9999"
+                                    Padding="4">
+                                <Viewbox Width="12" Height="12">
+                                    <Canvas Width="14" Height="14">
+                                        <Path Data="M10.5,3.5 L3.5,10.5 M3.5,3.5 L10.5,10.5"
+                                              Stroke="#6B7280"
+                                              StrokeThickness="1.5"
+                                              StrokeStartLineCap="Round"
+                                              StrokeEndLineCap="Round" />
+                                    </Canvas>
+                                </Viewbox>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bd" Property="Background"   Value="#F3F4F6" />
+                                    <Setter TargetName="Bd" Property="BorderBrush"  Value="#D1D5DB" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
                         </ControlTemplate>
                     </Button.Template>
                 </Button>
             </StackPanel>
 
-            <!-- ── Row 1: animated bird ── -->
+            <!-- ── Row 1: animated bird — ui.txt spec: 150px width ── -->
             <Image Grid.Row="1"
                    gif:ImageBehavior.AnimatedSource="pack://application:,,,/assets/nest_bird.gif"
                    gif:ImageBehavior.RepeatBehavior="Forever"
-                   Width="155" Height="155"
+                   Width="150" Height="150"
                    Stretch="Uniform"
                    Cursor="Hand"
                    HorizontalAlignment="Center"
