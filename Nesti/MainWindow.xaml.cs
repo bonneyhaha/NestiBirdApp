@@ -2,7 +2,6 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
-using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using Nesti.Controls;
 using Nesti.Helpers;
@@ -32,7 +31,10 @@ public partial class MainWindow : Window
     private readonly SoundService _sound;
 
     // ── State ─────────────────────────────────────────────────────────────────
-    private readonly HashSet<string> _seenIds = new();
+    private readonly HashSet<string> _seenIds      = new();
+    private readonly Queue<string>   _seenIdsOrder = new();   // insertion-order shadow for eviction
+    private const    int             MaxSeenIds    = 500;     // cap — prevents unbounded growth
+
     private readonly List<(NotificationControl Ctrl, DispatcherTimer Timer)> _active = new();
     private bool _birdHidden;
 
@@ -43,6 +45,13 @@ public partial class MainWindow : Window
 
         _sound = new SoundService(
             Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "bird_chirp.mp3"));
+
+        _hideControlsTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1200) };
+        _hideControlsTimer.Tick += (_, _) =>
+        {
+            _hideControlsTimer.Stop();
+            ControlButtons.Visibility = Visibility.Collapsed;
+        };
     }
 
     // ── Startup ───────────────────────────────────────────────────────────────
@@ -51,12 +60,7 @@ public partial class MainWindow : Window
         PositionAtBottomRight();
         InstallWndProcHook();
 
-        // Resolve display name in the background
-        var sysName   = UserHelper.GetSystemUsername();
-        var fullName  = await UserHelper.GetFullNameAsync(sysName) ?? sysName;
-        var firstName = UserHelper.GetFirstName(fullName);
-
-        GreetingTextBlock.Text = $"{UserHelper.GetGreeting()}, {firstName}!";
+        var sysName = UserHelper.GetSystemUsername();
 
         // Pick real WebSocket or dummy test service based on .env flag
         if (AppConfig.UseRealWebSocket)
@@ -124,10 +128,6 @@ public partial class MainWindow : Window
     {
         if (HitTest(BirdContainer, screen)) return true;
 
-        // GreetingBubble extends left of BirdContainer — check explicitly when visible
-        if (GreetingBubble.Visibility == Visibility.Visible && HitTest(GreetingBubble, screen))
-            return true;
-
         foreach (UIElement child in NotificationsPanel.Children)
             if (child is FrameworkElement fe && HitTest(fe, screen)) return true;
 
@@ -150,44 +150,21 @@ public partial class MainWindow : Window
     }
 
     // ── Bird hover ────────────────────────────────────────────────────────────
-    private DispatcherTimer? _hideControlsTimer;
+    // Created once and reused — avoids allocating a new DispatcherTimer on every hover-out.
+    private readonly DispatcherTimer _hideControlsTimer;
 
     private void BirdContainer_MouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
     {
-        _hideControlsTimer?.Stop();
+        _hideControlsTimer.Stop();
         ControlButtons.Visibility = Visibility.Visible;
-        ShowGreeting();
     }
 
     private void BirdContainer_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
     {
-        // Delay collapse so the buttons stay visible for ~1.2 s after the cursor leaves.
-        // This prevents them from vanishing the instant the user moves slightly off the bird.
-        _hideControlsTimer = new DispatcherTimer
-        {
-            Interval = TimeSpan.FromMilliseconds(1200)
-        };
-        _hideControlsTimer.Tick += (_, _) =>
-        {
-            _hideControlsTimer!.Stop();
-            ControlButtons.Visibility = Visibility.Collapsed;
-            HideGreeting();
-        };
+        // Restart the timer each time the cursor leaves. Buttons collapse after 1.2 s
+        // of inactivity so the user has time to click them without rushing.
+        _hideControlsTimer.Stop();
         _hideControlsTimer.Start();
-    }
-
-    private void ShowGreeting()
-    {
-        GreetingBubble.Visibility = Visibility.Visible;
-        GreetingBubble.BeginAnimation(OpacityProperty,
-            new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(200))));
-    }
-
-    private void HideGreeting()
-    {
-        var fade = new DoubleAnimation(1, 0, new Duration(TimeSpan.FromMilliseconds(200)));
-        fade.Completed += (_, _) => GreetingBubble.Visibility = Visibility.Collapsed;
-        GreetingBubble.BeginAnimation(OpacityProperty, fade);
     }
 
     // ── Bird click ────────────────────────────────────────────────────────────
@@ -209,8 +186,14 @@ public partial class MainWindow : Window
     private void CloseButton_Click(object sender, RoutedEventArgs e) =>
         Application.Current.Shutdown();
 
-    private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e) =>
+    private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
+    {
+        _hideControlsTimer.Stop();
+        foreach (var (_, timer) in _active)
+            timer.Stop();
+        _sound.Dispose();
         _ws?.Dispose();
+    }
 
     // ── Notification handling ─────────────────────────────────────────────────
     private void OnNotificationReceived(object? sender, NotificationMessage msg)
@@ -218,8 +201,8 @@ public partial class MainWindow : Window
         // Always dispatch to the UI thread
         Dispatcher.Invoke(() =>
         {
-            // Deduplicate
-            if (!_seenIds.Add(msg.DedupeKey)) return;
+            // Deduplicate (capped — oldest IDs evicted once the set reaches MaxSeenIds)
+            if (!TryAddSeen(msg.DedupeKey)) return;
 
             // Restore bird if the user had hidden it
             if (_birdHidden)
@@ -273,9 +256,12 @@ public partial class MainWindow : Window
         _active.RemoveAt(idx);
 
         if (animate)
-            ctrl.AnimateOut(() => NotificationsPanel.Children.Remove(ctrl));
+            ctrl.AnimateOut(() => { ctrl.Cleanup(); NotificationsPanel.Children.Remove(ctrl); });
         else
+        {
+            ctrl.Cleanup();
             NotificationsPanel.Children.Remove(ctrl);
+        }
     }
 
     // ── WebSocket status ──────────────────────────────────────────────────────
@@ -286,6 +272,24 @@ public partial class MainWindow : Window
     }
 
     // ── Utility ───────────────────────────────────────────────────────────────
+
+    // Returns false if the key was already seen (duplicate). Otherwise records it,
+    // evicting the oldest entry when the cap is reached so the set never grows unbounded.
+    private bool TryAddSeen(string key)
+    {
+        if (_seenIds.Contains(key)) return false;
+
+        if (_seenIds.Count >= MaxSeenIds)
+        {
+            var oldest = _seenIdsOrder.Dequeue();
+            _seenIds.Remove(oldest);
+        }
+
+        _seenIds.Add(key);
+        _seenIdsOrder.Enqueue(key);
+        return true;
+    }
+
     private static void OpenUrl(string url)
     {
         try

@@ -23,6 +23,10 @@ public static class NotificationApiService
 
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(5) };
 
+    // Loaded once from disk on first access; all subsequent reads/writes use this cache.
+    // Eliminates repeated full-file deserialise → LOH allocation on every dismiss.
+    private static HashSet<string>? _dismissedCache;
+
     // ── Snooze (MARS) ─────────────────────────────────────────────────────────
 
     /// <summary>
@@ -79,13 +83,10 @@ public static class NotificationApiService
 
     /// <summary>
     /// Returns true if the notification was previously dismissed/read.
-    /// Call this on startup before showing any notification.
+    /// Uses the in-memory cache — no disk I/O after first call.
     /// </summary>
-    public static bool IsDismissed(string notificationId)
-    {
-        var ids = LoadDismissedIds();
-        return ids.Contains(notificationId);
-    }
+    public static bool IsDismissed(string notificationId) =>
+        GetCache().Contains(notificationId);
 
     // ── Local file helpers ────────────────────────────────────────────────────
 
@@ -93,9 +94,10 @@ public static class NotificationApiService
     {
         try
         {
-            var ids = LoadDismissedIds();
+            var ids = GetCache();
             if (ids.Add(id))
             {
+                // Write to disk asynchronously; subsequent calls use in-memory cache.
                 Directory.CreateDirectory(Path.GetDirectoryName(StorePath)!);
                 await File.WriteAllTextAsync(StorePath, JsonSerializer.Serialize(ids));
             }
@@ -103,17 +105,26 @@ public static class NotificationApiService
         catch { }
     }
 
-    private static HashSet<string> LoadDismissedIds()
+    /// <summary>
+    /// Returns the in-memory dismissed ID cache, loading from disk the first time.
+    /// All subsequent calls return the same HashSet instance — zero disk I/O.
+    /// </summary>
+    private static HashSet<string> GetCache()
     {
+        if (_dismissedCache is not null) return _dismissedCache;
+
         try
         {
             if (File.Exists(StorePath))
             {
                 var raw = File.ReadAllText(StorePath);
-                return JsonSerializer.Deserialize<HashSet<string>>(raw) ?? new();
+                _dismissedCache = JsonSerializer.Deserialize<HashSet<string>>(raw) ?? new();
+                return _dismissedCache;
             }
         }
         catch { }
-        return new HashSet<string>();
+
+        _dismissedCache = new HashSet<string>();
+        return _dismissedCache;
     }
 }

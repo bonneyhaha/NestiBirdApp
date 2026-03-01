@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using Nesti.Services;
+using WpfAnimatedGif;
 
 namespace Nesti.Controls;
 
@@ -36,6 +37,7 @@ public partial class NotificationControl : UserControl
     // ── Animations ────────────────────────────────────────────────────────────
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        Loaded -= OnLoaded;   // one-shot — unsubscribe so the delegate can be collected
         var dur  = new Duration(TimeSpan.FromMilliseconds(1000));
         var ease = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.4 };
 
@@ -66,6 +68,22 @@ public partial class NotificationControl : UserControl
         CardScale.BeginAnimation(ScaleTransform.ScaleXProperty, scaleX);
         CardScale.BeginAnimation(ScaleTransform.ScaleYProperty, scaleY);
         BeginAnimation(OpacityProperty, fade);
+    }
+
+    /// <summary>
+    /// Releases GIF frame memory and clears text references immediately.
+    /// Called by MainWindow right before removing the card from the visual tree
+    /// so the ~0.5 MB of decoded GIF frames are freed without waiting for a GC cycle.
+    /// </summary>
+    public void Cleanup()
+    {
+        // Stop the animation and dispose its storyboard resources
+        ImageBehavior.GetAnimationController(AvatarImage)?.Dispose();
+        // Detach the animated source → WpfAnimatedGif releases all decoded BitmapFrames
+        ImageBehavior.SetAnimatedSource(AvatarImage, null);
+        // Drop string references so the GC can reclaim them sooner
+        TitleBlock.Text   = null;
+        MessageBlock.Text = null;
     }
 
     // ── Event handlers ────────────────────────────────────────────────────────

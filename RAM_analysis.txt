@@ -1,0 +1,288 @@
+================================================================================
+  NESTI — RAM CONSUMPTION ANALYSIS
+  WPF / .NET 8 / Windows Desktop Notification Assistant
+================================================================================
+
+Baseline process size (empty .NET 8 WPF app on Windows 11): ~55–80 MB
+Nesti typical working set at idle:                          ~90–130 MB
+Nesti peak (5 cards visible, playing sound):                ~140–180 MB
+
+This document breaks down every identified RAM consumer, estimates its cost,
+and lists concrete reduction options.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 1 — HIGH IMPACT (fix these first)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+──────────────────────────────────────────────────────────────────────────────
+1.1  Animated GIFs decoded into RAM   [Severity: HIGH]
+──────────────────────────────────────────────────────────────────────────────
+Files:
+  assets/nest_bird.gif   412 KB on disk
+  assets/jarvis.gif      232 KB on disk
+
+Problem:
+  WpfAnimatedGif 2.0.0 decodes EVERY frame of each GIF into individual
+  BitmapFrame objects in managed memory at startup. Compressed file size is
+  misleading — the actual cost is:
+
+    decoded cost ≈ frame_count × width × height × 4 bytes (RGBA)
+
+  Estimates (frame counts typical for animation GIFs of this size):
+    nest_bird.gif  : ~15 frames × 150 × 150 px × 4 = ~1.35 MB (raw pixels)
+                     + BitmapFrame overhead → ~2–4 MB total in managed heap
+    jarvis.gif     : ~12 frames × 48 × 48 px × 4 = ~110 KB raw
+                     but one instance is created PER notification card:
+                     5 active cards × ~0.5 MB overhead = ~2.5 MB
+
+  Total GIF RAM:  ~4–7 MB (higher if GIFs have more frames than estimated)
+
+Reduction options (choose one or combine):
+  A. Replace both GIFs with APNG or WebP (smaller frame data, less overhead).
+  B. Replace jarvis.gif (card icon) with a static PNG — users barely notice
+     the difference on a 48x48 icon. Saves ~2.5 MB at peak (5 cards).
+  C. Resize nest_bird.gif to exactly 150×150 before import (avoid any
+     WPF rescaling pass keeping extra bitmaps in cache).
+  D. Switch to XamlAnimatedGif 2.x which supports frame-on-demand decoding
+     (only keeps the current frame + next frame in RAM instead of all frames).
+
+Effort: Low (A/B = replace asset file only, no code change)
+
+──────────────────────────────────────────────────────────────────────────────
+1.2  DropShadowEffect — GPU offscreen bitmaps   [Severity: HIGH]
+──────────────────────────────────────────────────────────────────────────────
+Files:
+  MainWindow.xaml (GreetingBubble)
+  Controls/NotificationControl.xaml (Card Border + Avatar Border)
+
+Problem:
+  Each DropShadowEffect instructs WPF's rendering pipeline to allocate an
+  offscreen render target (GPU texture + system memory copy) sized at:
+
+    (element_width  + 2 × BlurRadius) × (element_height + 2 × BlurRadius) × 4
+
+  Current instances and their cost (per-card):
+
+    Notification Card (420×~70, BlurRadius=8):
+      offscreen bitmap = (420+16) × (70+16) × 4  =  ~150 KB  per card
+      × 5 active cards                            =  ~750 KB
+
+    Avatar inside card (48×48, BlurRadius=12):
+      offscreen bitmap = (48+24) × (48+24) × 4   =  ~20 KB per card
+      × 5 active cards                            =  ~100 KB
+
+    GreetingBubble (300×~80, BlurRadius=8):
+      offscreen bitmap = (300+16) × (80+16) × 4  =  ~120 KB (when visible)
+
+  Total DropShadow GPU RAM: ~1–1.5 MB
+  Additionally each offscreen bitmap prevents hardware-accelerated
+  composition for that element, increasing GPU memory bandwidth.
+
+Reduction options:
+  A. Remove DropShadowEffect from Avatar Border inside cards — it is tiny
+     (48×48) and the shadow is barely perceptible at that size.
+     Saves ~100 KB × (up to 5 cards) with zero visual impact.
+  B. Reduce BlurRadius on Card from 8 → 4. RAM cost roughly halves:
+     (420+8) × (70+8) × 4 = ~133 KB (was ~150 KB), plus GPU work halves.
+  C. Replace card DropShadowEffect with a simple Border with slightly darker
+     outer color — zero GPU cost, similar visual feel.
+  D. Set CacheMode="BitmapCache" on static elements like BirdContainer so
+     WPF composites them from a cached bitmap rather than re-rendering each frame.
+
+Effort: Very Low (change numbers in XAML, no logic change)
+
+──────────────────────────────────────────────────────────────────────────────
+1.3  _seenIds HashSet grows without bound   [Severity: MEDIUM-HIGH]
+──────────────────────────────────────────────────────────────────────────────
+File: MainWindow.xaml.cs  — field: _seenIds
+
+Problem:
+  Every received notification ID is added to _seenIds and never removed.
+  For a long-running process receiving thousands of notifications per day
+  this grows indefinitely. Each string entry uses ~50–80 bytes (object
+  header + char array). 10,000 notifications = ~800 KB of live strings
+  that can never be GC'd while the app is running.
+
+Reduction options:
+  A. Cap the set: if _seenIds.Count > MAX_SEEN (e.g. 1000), remove the
+     oldest IDs. Since IDs are strings, a simple Queue<string> shadow
+     structure lets you evict by insertion order.
+  B. Use a circular buffer of the last N IDs only (N = max expected
+     notifications in one session, e.g. 500).
+  C. Clear _seenIds on startup after loading dismissed.json — dismissed
+     IDs are already persisted on disk, so in-memory deduplication only
+     needs to cover the current session.
+
+Effort: Low (small code change in MainWindow.xaml.cs)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 2 — MEDIUM IMPACT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+──────────────────────────────────────────────────────────────────────────────
+2.1  MediaPlayer — new instance on every sound   [Severity: MEDIUM]
+──────────────────────────────────────────────────────────────────────────────
+File: Services/SoundService.cs
+
+Problem:
+  Each call to Play() does:
+    _player?.Close();
+    _player = new MediaPlayer();
+    _player.Open(...);
+    _player.Play();
+
+  MediaPlayer internally loads the Windows Media Foundation COM graph per
+  instance. Closing the old one and creating a new one works, but:
+    • The GC may not collect the old MediaPlayer immediately, so briefly
+      two instances coexist in memory (~2–5 MB each in WMF COM objects).
+    • Rapid notifications (3+ per minute) can cause brief spikes of
+      ~10–15 MB in COM/native heap during the GC delay.
+
+Reduction options:
+  A. After playback completes (MediaPlayer.MediaEnded event), call
+     _player.Close() and set _player = null. This bounds the lifetime
+     to exactly the audio duration rather than until the next Play().
+  B. Use SoundPlayer (System.Media.SoundPlayer) with a WAV file instead —
+     it keeps the decoded audio in a fixed byte array (tiny, predictable).
+  C. Pre-load the MP3 into memory with MediaPlayer.Open() once at startup
+     and just call Stop()/Play() each time instead of re-opening.
+
+Effort: Low (SoundService.cs is 38 lines)
+
+──────────────────────────────────────────────────────────────────────────────
+2.2  dismissed.json re-read on every dismiss   [Severity: MEDIUM]
+──────────────────────────────────────────────────────────────────────────────
+File: Services/NotificationApiService.cs — StoreDismissedIdAsync / LoadDismissedIds
+
+Problem:
+  Every dismiss call does:
+    LoadDismissedIds() → reads + deserializes dismissed.json from disk
+    if (ids.Add(id)) → writes dismissed.json
+
+  This means the entire HashSet<string> (all previously dismissed IDs)
+  is deserialized from disk on every dismiss, held briefly in RAM,
+  serialized, and written back. If dismissed.json has grown large
+  (e.g. 1,000 entries × ~30 chars each = ~30 KB JSON), this creates
+  repeated short-lived allocations on the LOH (Large Object Heap) that
+  the GC cannot compact.
+
+Reduction options:
+  A. Cache the dismissed ID set in a static field after the first load.
+     Append new IDs to it in memory. Write the file asynchronously.
+     Eliminates repeated full-file reads.
+  B. Prune dismissed.json on startup: remove IDs older than 30 days
+     (if timestamps are added to the store). Keeps the file size bounded.
+
+Effort: Low-Medium
+
+──────────────────────────────────────────────────────────────────────────────
+2.3  WebSocket receive buffer — always allocated   [Severity: LOW-MEDIUM]
+──────────────────────────────────────────────────────────────────────────────
+File: Services/WebSocketService.cs  line 101
+
+Problem:
+  `var buffer = new byte[8_192];`
+  This 8 KB buffer is allocated each time ListenAsync() is entered (every
+  reconnect). Combined with the StringBuilder it is fine for a single
+  connection, but on 10 reconnect cycles, 10 short-lived 8 KB arrays
+  are allocated. Not a major concern but a micro-optimization opportunity.
+
+Reduction options:
+  A. Use ArrayPool<byte>.Shared.Rent(8_192) and .Return() to reuse the
+     buffer across reconnects — zero allocation per reconnect.
+
+Effort: Very Low (2-line change in WebSocketService.cs)
+
+──────────────────────────────────────────────────────────────────────────────
+2.4  DispatcherTimers not explicitly nulled after use   [Severity: LOW]
+──────────────────────────────────────────────────────────────────────────────
+File: MainWindow.xaml.cs — _hideControlsTimer, per-notification timers in _active
+
+Problem:
+  Per-notification DispatcherTimers are stopped and removed from _active
+  correctly in RemoveNotification(). No leak there. The _hideControlsTimer
+  for bird controls creates a new DispatcherTimer on each MouseLeave; the
+  old timer is stopped but the object is replaced (old is abandoned for GC).
+  Minor — DispatcherTimer is small (~1 KB), but creating one per hover-out
+  is slightly wasteful if the user moves the mouse rapidly.
+
+Reduction option:
+  Reuse a single DispatcherTimer instance (create once, just Stop/Start it).
+  Saves object allocation per hover-out event.
+
+Effort: Very Low
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 3 — LOW IMPACT / BASELINE COSTS (informational)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+3.1  .NET 8 + WPF runtime base
+     ~55–80 MB working set — unavoidable for any WPF app.
+     Most of this is the CLR JIT, WPF assemblies (PresentationCore,
+     PresentationFramework, WindowsBase), and the DirectX/D3D9 layer.
+
+3.2  HttpClient (static singleton)
+     ~300 KB for the connection pool. Shared correctly as a static field
+     in NotificationApiService. No leak, no concern.
+
+3.3  WPF visual tree per notification card
+     Each NotificationControl creates roughly 30+ UIElement objects
+     (Grid, Border, StackPanel, TextBlock × 2, Image, etc.).
+     Cost: ~10–20 KB managed heap per card × 5 = ~100 KB. Negligible.
+
+3.4  NotificationMessage objects in _seenIds
+     Only the DedupeKey string is stored (not the full object). Once the
+     notification is displayed and removed from _active, the
+     NotificationMessage object itself is GC-eligible. No leak.
+
+3.5  bird_chirp.mp3 (80 KB on disk)
+     Loaded by MediaPlayer via Windows Media Foundation COM streaming.
+     Not decoded into managed heap — stays in native memory.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 4 — QUICK-WIN PRIORITY TABLE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Priority | Item                               | Est. Savings | Effort
+  ---------|------------------------------------|--------------|---------
+  1        | Replace jarvis.gif → static PNG    | ~2–3 MB      | None (asset swap)
+  2        | Remove avatar DropShadowEffect      | ~100 KB/card | 3 lines XAML
+  3        | Reduce card BlurRadius 8 → 4        | ~30% GPU RAM | 1 line XAML
+  4        | Cap _seenIds at 500 entries         | 0–800 KB     | ~10 lines code
+  5        | Cache dismissed.json in memory      | GC pressure  | ~20 lines code
+  6        | Reuse _hideControlsTimer instance   | Micro        | ~5 lines code
+  7        | ArrayPool for WS receive buffer     | Micro        | 2 lines code
+  8        | MediaPlayer.MediaEnded close()      | ~5 MB spike  | ~5 lines code
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 5 — HOW TO MEASURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Tools:
+  • Task Manager → Details tab → Right-click columns → add "Working Set"
+    Shows total physical RAM allocated to the process.
+
+  • Windows Performance Monitor (perfmon):
+    Add counter: Process → Working Set → Nesti
+    Add counter: Process → Private Bytes → Nesti
+    Add counter: .NET CLR Memory → # Bytes in All Heaps → Nesti
+    These three together show OS-level, private, and managed heap separately.
+
+  • dotnet-counters (CLI, free):
+    dotnet-counters monitor --process-id <PID> System.Runtime
+    Shows GC heap size, Gen0/1/2 collections, LOH size in real time.
+
+  • Visual Studio Diagnostic Tools → Memory Usage snapshot
+    Take a snapshot at idle and one at peak (5 cards visible) to diff
+    exactly which objects are consuming managed heap.
+
+Recommended measurement sequence:
+  1. Start Nesti, wait 30 s for startup to stabilise → record baseline
+  2. Trigger 5 rapid notifications → record peak
+  3. Wait for all cards to auto-dismiss → record after cleanup
+  4. After step 2 vs step 3 delta shows if cards clean up properly
+     (expect ~5–10 MB drop per card dismissed if GIFs are freed)
+
+================================================================================
+  END OF ANALYSIS
+================================================================================

@@ -19,21 +19,16 @@
         Fully transparent window.
         Click-through: WM_NCHITTEST returns HTTRANSPARENT for empty areas,
         HTCLIENT only for the bird zone and active notification cards.
-
-        BirdContainer uses two rows so control buttons are INSIDE its layout
-        bounds — this is what fixes the "hover only half-works" bug:
-          Row 0 (32px) : minimize + close buttons  ← always within bounds
-          Row 1 (* )   : animated bird GIF
-        GreetingBubble is checked explicitly in IsInteractive().
     -->
     <Grid Background="Transparent">
 
         <!-- ── Notification stack ── -->
         <!-- Width matches NotificationControl.xaml (420) + panel margin -->
+        <!-- bottom = BirdContainer top (158+5=163) + 10px gap = 173 -->
         <StackPanel x:Name="NotificationsPanel"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Bottom"
-                    Margin="0,0,5,200"
+                    Margin="0,0,5,173"
                     Width="425" />
 
         <!-- ── Bird zone ── -->
@@ -42,33 +37,27 @@
               VerticalAlignment="Bottom"
               Margin="0,0,5,5"
               Width="160"
-              Height="190"
+              Height="158"
               MouseEnter="BirdContainer_MouseEnter"
               MouseLeave="BirdContainer_MouseLeave">
 
-            <Grid.RowDefinitions>
-                <RowDefinition Height="32" />   <!-- Row 0: control buttons -->
-                <RowDefinition Height="*" />    <!-- Row 1: bird GIF        -->
-            </Grid.RowDefinitions>
-
             <!--
-                ── Row 0: control buttons ──
+                Buttons float over the top-right corner of the bird GIF row.
                 Styled exactly per ui.txt §7.1 (Button CSS Specifications):
                   • Background : #F9FAFB  (bg-gray-50)
                   • Border     : 1px solid #E5E7EB
                   • Shape      : rounded-full  (CornerRadius="9999")
-                  • Padding    : 4px  (p-[1px] → 4px per CSS spec)
+                  • Padding    : 4px
                   • SVG icons  : 12×12 displayed in a 14×14 viewBox
                   • Hover bg   : #F3F4F6  (bg-gray-100)
                   • Hover border: #D1D5DB (border-gray-300)
                   • Stroke     : #6B7280, 1.5px, round line-caps
             -->
             <StackPanel x:Name="ControlButtons"
-                        Grid.Row="0"
                         HorizontalAlignment="Right"
-                        VerticalAlignment="Center"
+                        VerticalAlignment="Top"
                         Orientation="Horizontal"
-                        Margin="0,0,4,0"
+                        Margin="0,22,4,0"
                         Visibility="Collapsed">
 
                 <!-- Minimize / Hide button — SVG dash icon (M3,7 L11,7) -->
@@ -142,9 +131,8 @@
                 </Button>
             </StackPanel>
 
-            <!-- ── Row 1: animated bird — ui.txt spec: 150px width ── -->
-            <Image Grid.Row="1"
-                   gif:ImageBehavior.AnimatedSource="pack://application:,,,/assets/nest_bird.gif"
+            <!-- ── animated bird — ui.txt spec: 150px width ── -->
+            <Image gif:ImageBehavior.AnimatedSource="pack://application:,,,/assets/nest_bird.gif"
                    gif:ImageBehavior.RepeatBehavior="Forever"
                    Width="150" Height="150"
                    Stretch="Uniform"
@@ -153,38 +141,7 @@
                    VerticalAlignment="Bottom"
                    MouseLeftButtonDown="Bird_Click" />
 
-            <!-- ── Greeting bubble (overlaid, extends left — checked explicitly in WM_NCHITTEST) ── -->
-            <Border x:Name="GreetingBubble"
-                    Grid.Row="1"
-                    HorizontalAlignment="Right"
-                    VerticalAlignment="Top"
-                    Margin="0,-90,155,0"
-                    Width="300"
-                    Background="#CCFFFFFF"
-                    BorderBrush="#40FFFFFF"
-                    BorderThickness="1"
-                    CornerRadius="18"
-                    Padding="16,12"
-                    Visibility="Collapsed"
-                    Opacity="0">
-                <Border.Effect>
-                    <DropShadowEffect Color="#000000" Opacity="0.10"
-                                      BlurRadius="8" ShadowDepth="3" Direction="270" />
-                </Border.Effect>
-                <StackPanel>
-                    <TextBlock FontSize="15" FontWeight="Bold">
-                        <Run Text="Hi, I'm " Foreground="#374151" />
-                        <Run Text="Nesti!" Foreground="#1C38D4" />
-                    </TextBlock>
-                    <TextBlock x:Name="GreetingTextBlock"
-                               FontSize="11"
-                               Foreground="#6B7280"
-                               Margin="0,4,0,0"
-                               TextWrapping="Wrap">
-                        Your notification assistant
-                    </TextBlock>
-                </StackPanel>
-            </Border>
+
         </Grid>
 
     </Grid>

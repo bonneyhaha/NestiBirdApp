@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Net.Http;
 using System.Net.WebSockets;
 using System.Text;
@@ -98,8 +99,12 @@ public sealed class WebSocketService : IWebSocketSource
 
     private async Task ListenAsync(CancellationToken ct)
     {
-        var buffer = new byte[8_192];
+        // Rent from the shared pool so repeated reconnects don't allocate a new
+        // 8 KB array each time — the same buffer is reused across reconnect cycles.
+        const int BufSize = 8_192;
+        var buffer = ArrayPool<byte>.Shared.Rent(BufSize);
         var sb     = new StringBuilder();
+        bool reconnect = false;
 
         try
         {
@@ -110,10 +115,13 @@ public sealed class WebSocketService : IWebSocketSource
 
                 do
                 {
-                    result = await _ws.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
+                    result = await _ws.ReceiveAsync(new ArraySegment<byte>(buffer, 0, BufSize), ct);
 
                     if (result.MessageType == WebSocketMessageType.Close)
-                        goto disconnected;
+                    {
+                        reconnect = true;
+                        return;
+                    }
 
                     sb.Append(Encoding.UTF8.GetString(buffer, 0, result.Count));
                 }
@@ -123,10 +131,13 @@ public sealed class WebSocketService : IWebSocketSource
             }
         }
         catch (OperationCanceledException) { return; }
-        catch { /* socket dropped */ }
+        catch { reconnect = true; }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);   // always returned, even on exception
+        }
 
-        disconnected:
-        if (!ct.IsCancellationRequested)
+        if (reconnect && !ct.IsCancellationRequested)
             await ScheduleReconnectAsync();
     }
 

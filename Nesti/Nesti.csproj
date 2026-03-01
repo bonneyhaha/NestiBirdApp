@@ -24,8 +24,6 @@
     <Resource Include="assets\jarvis.gif" />
 
     <!-- PNG icons embedded as WPF resources -->
-    <Resource Include="assets\cross_button_notif.png" />
-    <Resource Include="assets\minimize_button_icon.png" />
     <Resource Include="assets\snooze_icon.png" />
     <Resource Include="assets\cross_button_notif_icon.png" />
 

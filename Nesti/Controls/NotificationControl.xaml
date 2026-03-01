@@ -15,27 +15,18 @@
     </UserControl.RenderTransform>
 
     <Border x:Name="Card"
+            Background="White"
+            BorderBrush="#E5E7EB"
             BorderThickness="1"
             CornerRadius="12"
             Padding="4"
             Cursor="Hand"
             MouseLeftButtonDown="Card_Click">
 
-        <Border.Background>
-            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                <GradientStop Color="#E6FFFFFF" Offset="0" />
-                <GradientStop Color="#4DEFF6FF" Offset="1" />
-            </LinearGradientBrush>
-        </Border.Background>
-
-        <Border.BorderBrush>
-            <SolidColorBrush Color="#4DDBEAFE" />
-        </Border.BorderBrush>
-
         <Border.Effect>
             <DropShadowEffect Color="#000000"
                               Opacity="0.10"
-                              BlurRadius="8"
+                              BlurRadius="4"
                               ShadowDepth="3"
                               Direction="270" />
         </Border.Effect>
@@ -52,19 +43,10 @@
                     CornerRadius="12"
                     VerticalAlignment="Center">
                 <Border.Background>
-                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                        <GradientStop Color="#3B82F6" Offset="0" />
-                        <GradientStop Color="#9333EA" Offset="1" />
-                    </LinearGradientBrush>
+                    <SolidColorBrush Color="#3B82F6" />
                 </Border.Background>
-                <Border.Effect>
-                    <DropShadowEffect Color="#000000"
-                                      Opacity="0.10"
-                                      BlurRadius="12"
-                                      ShadowDepth="4"
-                                      Direction="270" />
-                </Border.Effect>
-                <Image gif:ImageBehavior.AnimatedSource="pack://application:,,,/assets/jarvis.gif"
+                <Image x:Name="AvatarImage"
+                       gif:ImageBehavior.AnimatedSource="pack://application:,,,/assets/jarvis.gif"
                        gif:ImageBehavior.RepeatBehavior="Forever"
                        Width="32" Height="32"
                        Stretch="Uniform" />
