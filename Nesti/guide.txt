@@ -1,0 +1,401 @@
+NESTI — COMPLETE FILE GUIDE
+============================
+Every file in the project, what it contains, and when to touch it.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ROOT LEVEL  (Nesti/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+README.md
+  What:   Project overview, feature list, .env reference, build commands.
+  Touch:  When you add features, change .env keys, or change the build process.
+
+Nesti.slnx
+  What:   Visual Studio solution file — lists the Nesti project.
+  Touch:  Only when adding new projects to the solution.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PROJECT ROOT  (Nesti/Nesti/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+.env
+  What:   Runtime configuration file. Copied next to exe on every build.
+          All URLs, timeouts, flags, and feature toggles live here.
+          Change any value without recompiling.
+  Keys:
+    WS_URL                  — Base WebSocket URL. Final URL = {WS_URL}/{mEmpID}
+    WS_RECONNECT_BASE_MS    — Initial reconnect delay (default 2000ms)
+    WS_RECONNECT_MAX_ATTEMPTS — Max reconnect retries (default 10)
+    API_BASE_URL            — Full URL for the mEmpID lookup API
+    API_GET_FULLNAME_PATH   — Path for the employee display name API
+    BIRD_DEFAULT_URL        — URL opened when bird is clicked
+    NOTIFICATION_DURATION_MS — How long each card stays (default 10000ms)
+    MAX_NOTIFICATIONS       — Max visible cards (default 5)
+    SOUND_ENABLED           — true/false (default true)
+    USE_REAL_WEBSOCKET      — true = real server, false = dummy test mode
+    DUMMY_INTERVAL_MS       — Fake notification interval (default 5000ms)
+    MARS_SNOOZE_URL         — POST URL for snooze action
+    MARK_AS_READ_URL        — POST URL for mark-as-read action
+  Touch:  Every time you point the app at a new server or change behaviour.
+
+Nesti.csproj
+  What:   MSBuild project file. Defines:
+          - Target framework (net8.0-windows)
+          - NuGet packages (DotNetEnv 3.1.1)
+          - Embedded resources: nest_bird.gif, jarvis.gif, cross_button_notif_icon.png
+          - Content files copied to output: bird_chirp.mp3, .env
+          - Custom app manifest reference
+  Touch:  When adding NuGet packages, new asset files, or changing build settings.
+
+app.manifest
+  What:   Windows application manifest. Sets DPI awareness to System (V1) only.
+          Deliberately omits PerMonitorV2 to prevent per-monitor render-target
+          reallocation on high-DPI machines, keeping RAM usage fixed.
+  Touch:  Rarely. Only if DPI behaviour needs to change.
+
+App.xaml
+  What:   WPF application entry point markup. Declares the App class.
+  Touch:  When adding application-level resources or styles.
+
+App.xaml.cs
+  What:   Overrides OnStartup to set RenderMode.SoftwareOnly BEFORE
+          base.OnStartup() runs. This prevents any D3D device or VRAM
+          allocation for the lifetime of the process.
+  Touch:  Rarely. Only if render mode strategy changes.
+
+MainWindow.xaml
+  What:   The main window definition. Key settings:
+          - WindowStyle="None"           — no title bar or border
+          - AllowsTransparency="True"    — per-pixel transparency
+          - Background="Transparent"     — see-through where no UI is drawn
+          - Topmost="True"               — always on top
+          - ShowInTaskbar="False"        — hidden from taskbar
+          - ResizeMode="NoResize"        — fixed 700×700 size
+          Contains:
+          - NotificationsPanel (StackPanel, right-aligned, above bird)
+          - BirdContainer (Grid with bird image + hover control buttons)
+          - Hide button (inline SVG path — dash icon)
+          - Close button (inline SVG path — × icon)
+  Touch:  When changing window size, layout, or bird/button appearance.
+
+MainWindow.xaml.cs
+  What:   Code-behind for the main window. Responsibilities:
+          - Win32 P/Invoke: GetWindowLong / SetWindowLong to set
+            WS_EX_TOOLWINDOW (hides from Alt+Tab)
+          - WndProc hook: returns HTTRANSPARENT for empty areas (click-through),
+            HTCLIENT only for the bird and active notification cards
+          - Window_Loaded: positions window, installs hook, loads bird GIF,
+            reads username, resolves WebSocket URL, connects
+          - Bird hover: shows/hides ControlButtons with a 1.2s auto-hide timer
+          - Bird click: opens BIRD_DEFAULT_URL
+          - Notification lifecycle: AddNotification, RemoveNotification,
+            auto-dismiss DispatcherTimer, deduplication (HashSet capped at 500)
+          - Window_Closing: stops all timers, disposes WebSocket and sound
+  Touch:  When changing click-through logic, notification management,
+          window positioning, or startup sequence.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MODELS  (Nesti/Nesti/Models/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+NotificationMessage.cs
+  What:   The JSON payload model for incoming WebSocket notifications.
+  Fields:
+    id               — primary unique identifier
+    instanceId       — secondary dedup key
+    title            — card title (required)
+    message          — card body text
+    description      — fallback body if message is absent
+    url              — URL opened on card click
+    type             — e.g. "info", "alert"
+    notificationType — e.g. "task", "meeting"
+    user_id          — sender/owner username
+    timestamp        — when the notification was created
+  Computed:
+    DedupeKey        — instanceId ?? id ?? "{title}|{message}|{timestamp}"
+    Body             — message ?? description ?? ""
+  Touch:  When the server adds new JSON fields you want to use.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+HELPERS  (Nesti/Nesti/Helpers/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+AppConfig.cs
+  What:   Static class that reads all configuration from the .env file.
+          Uses DotNetEnv to load the file at first access.
+          All properties are read-only computed properties — values
+          are re-read from environment on each access.
+  Properties:
+    WsUrl                   — WS_URL
+    WsReconnectBaseMs       — WS_RECONNECT_BASE_MS
+    WsReconnectMaxAttempts  — WS_RECONNECT_MAX_ATTEMPTS
+    ApiBaseUrl              — API_BASE_URL (full endpoint for mEmpID lookup)
+    ApiGetFullnamePath      — API_GET_FULLNAME_PATH
+    BirdDefaultUrl          — BIRD_DEFAULT_URL
+    NotificationDurationMs  — NOTIFICATION_DURATION_MS
+    MaxNotifications        — MAX_NOTIFICATIONS
+    SoundEnabled            — SOUND_ENABLED
+    UseRealWebSocket        — USE_REAL_WEBSOCKET
+    DummyIntervalMs         — DUMMY_INTERVAL_MS
+    MarsSnoozeUrl           — MARS_SNOOZE_URL
+    MarkAsReadUrl           — MARK_AS_READ_URL
+  Touch:  When adding new .env keys — add a matching property here.
+
+UserHelper.cs
+  What:   Static utility class for user identity.
+  Methods:
+    GetSystemUsername()     — reads Environment.UserName (the Windows login name,
+                              e.g. "jdoe"). Falls back to USERNAME env var, then "Guest".
+    GetFullNameAsync(u)     — GET {API_BASE_URL}{API_GET_FULLNAME_PATH}?username={u}
+                              Returns JSON field "fullName" or null on failure.
+    GetFirstName(fullName)  — extracts first word from full name; if ≤2 chars picks
+                              the longest word instead (handles "De Santos, Maria" etc.)
+    GetGreeting()           — "Good Morning" / "Good Afternoon" / "Good Evening"
+                              based on current hour
+  Touch:  When the user identity or name resolution logic needs to change.
+
+SharedGifPlayer.cs
+  What:   Custom GIF animation engine. Replaces WpfAnimatedGif library entirely.
+          Implements proper GIF compositing — frame offsets, disposal methods,
+          binary transparency, canvas accumulation — using:
+          - BitmapCacheOption.None: decoder re-reads each frame from MemoryStream
+            on demand, no full decode cached in RAM
+          - WriteableBitmap: single shared surface — all Image controls that point
+            to SharedBitmap automatically see frame updates via WritePixels
+          - ArrayPool<byte>: per-tick scratch buffer rented and returned, zero heap
+            allocation per animation frame
+          - Static cache: one SharedGifPlayer instance per pack:// URI
+  Key members:
+    SharedBitmap            — the WriteableBitmap Image controls should bind to
+    Get(packUri)            — returns cached instance, creates one if absent
+    CompositeFrame(i)       — reads frame i, blends into _canvas, WritePixels
+    ApplyDisposal(i)        — handles disposal method 0/1 (keep), 2 (clear), 3 (restore)
+    BlendIntoCanvas(...)    — per-pixel alpha blend of frame sub-rectangle into canvas
+  Touch:  If GIF rendering has issues (distortion, wrong colours, wrong timing).
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SERVICES  (Nesti/Nesti/Services/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+IWebSocketSource.cs
+  What:   Interface that both WebSocketService and DummyWebSocketService implement.
+          Allows MainWindow to switch between real and dummy mode without knowing
+          which is in use.
+  Members:
+    NotificationReceived    — event fired when a notification arrives
+    StatusChanged           — event fired with status strings
+    ConnectAsync(url)       — start the connection
+    Dispose()               — clean up
+  Touch:  If you add new events or methods needed by both implementations.
+
+WebSocketService.cs
+  What:   Real WebSocket implementation. Full flow:
+          1. ResolveUrlAsync(username):
+             - Builds CorpID = "Corp\" + windowsLoginName
+             - GET {API_BASE_URL}?CorpID={CorpID} → parse "mEmpID"
+             - Returns {WS_URL}/{mEmpID}
+          2. ConnectAsync(url):
+             - Creates ClientWebSocket
+             - 15-second connection timeout via linked CancellationTokenSource
+             - On success: starts heartbeat timer + ListenAsync loop
+             - On failure: ScheduleReconnectAsync
+          3. ListenAsync:
+             - 8KB buffer rented from ArrayPool<byte>.Shared (reused across reconnects)
+             - Loops ReceiveAsync until EndOfMessage
+             - Handles multi-frame messages by accumulating into StringBuilder
+             - On Close frame or exception: triggers reconnect
+          4. ParseAndRaise:
+             - Detects {"type":"pong"} → cancels pong timeout, returns
+             - Otherwise deserializes as NotificationMessage → fires event
+          5. ScheduleReconnectAsync:
+             - Exponential back-off: base × 2^(attempt-1), capped at 60s
+             - ±10% jitter added (Random.Shared)
+             - Max attempts from .env (default 10)
+          6. Heartbeat (every 25s):
+             - Sends {"type":"ping", "timestamp":"..."}
+             - Starts 7s pong timeout
+             - If no pong in 7s: _ws.Abort() → triggers reconnect via ListenAsync
+  Touch:  WebSocket URL logic, reconnect strategy, heartbeat timing, message parsing.
+
+DummyWebSocketService.cs
+  What:   Test stub. Fires pre-defined notifications on a DispatcherTimer.
+          Activated when USE_REAL_WEBSOCKET=false in .env.
+          Rotates through 7 sample notifications (task, meeting, PR, deploy, alert,
+          comment, weekly summary). Each gets a unique ID to bypass deduplication.
+  Touch:  When adding or changing test notification samples, or the dummy interval.
+
+SoundService.cs
+  What:   Wraps MediaPlayer for MP3 playback.
+          Play() stops any current playback, resets position to 0, and plays.
+          Dispose() stops and closes the player.
+  Touch:  If the sound format changes or volume control is needed.
+
+NotificationApiService.cs
+  What:   Static class handling the two notification action APIs.
+          All methods are fire-and-forget — they never throw to the caller.
+  Methods:
+    SnoozeAsync(id)         — POST {MARS_SNOOZE_URL} { "id": id }
+                              Body is a TODO placeholder — fill in the real
+                              MARS API contract fields when defined.
+    MarkAsReadAsync(id)     — POST {MARK_AS_READ_URL} { "id": id }
+                              Also persists the ID to dismissed.json locally.
+    IsDismissed(id)         — checks in-memory cache (no disk I/O after first load)
+  Local storage:
+    %AppData%\Nesti\dismissed.json
+    Loaded once into HashSet<string> on first access. Subsequent calls use the
+    in-memory cache. New IDs appended and written asynchronously.
+  Touch:  When the snooze payload contract is defined, or when the mark-as-read
+          API changes.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CONTROLS  (Nesti/Nesti/Controls/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+NotificationControl.xaml
+  What:   The notification card UI. Each incoming notification creates one instance.
+  Layout:
+    Outer Grid
+    ├── Shadow Border (offset 2px down-right, semi-transparent black, IsHitTestVisible=False)
+    │   No DropShadowEffect — replaced with this cheap CSS-shadow illusion
+    └── Card Border (white background, #E5E7EB border, CornerRadius=12, Cursor=Hand)
+        └── Grid (two columns)
+            ├── Avatar Border (48×48, blue #3B82F6, CornerRadius=12)
+            │   └── Image (AvatarImage — 32×32, bound to SharedGifPlayer.SharedBitmap)
+            └── Content Grid
+                ├── StackPanel (title + message text blocks)
+                │   ├── TitleBlock (FontSize=16, SemiBold, #1F2937)
+                │   └── MessageBlock (FontSize=12, #6B7280, wrapping)
+                └── Action buttons (top-right)
+                    ├── SnoozeBtn (Viewbox with inline SVG Path — bell icon)
+                    └── DismissBtn (Image — cross_button_notif_icon.png)
+  Animations:
+    Slide in: TranslateTransform X from 400→0 (BackEase, 1000ms)
+    Scale in: ScaleTransform 0.9→1 (BackEase, 1000ms)
+    Fade in:  Opacity 0→1 (400ms)
+  All brushes frozen with po:Freeze="True" — no per-instance change-notification.
+  Touch:  Card layout, colours, font sizes, animation timing.
+
+NotificationControl.xaml.cs
+  What:   Code-behind for the notification card.
+  Key behaviour:
+    Constructor:
+      - Binds AvatarImage.Source to SharedGifPlayer.Get(jarvis.gif).SharedBitmap
+        (no event subscription — WriteableBitmap propagates updates automatically)
+    SetData(id, title, body, url):
+      - Sets NotificationId, TitleBlock.Text, MessageBlock.Text, NotificationUrl
+    Card_Click:
+      - Opens NotificationUrl in browser
+      - Calls NotificationApiService.MarkAsReadAsync(id) fire-and-forget
+      - Fires DismissRequested
+    Snooze_MouseDown/Up:
+      - Captures mouse on down, releases on up (prevents ghost clicks)
+      - Calls NotificationApiService.SnoozeAsync(id) fire-and-forget
+      - Fires SnoozeRequested
+    Dismiss_MouseDown/Up:
+      - Same pattern as snooze
+      - Calls MarkAsReadAsync fire-and-forget
+      - Fires DismissRequested
+    AnimateOut(onComplete):
+      - Slides card right + shrinks + fades (500ms, CubicEase)
+      - Calls onComplete when fade finishes (MainWindow removes from panel)
+    Cleanup():
+      - Sets AvatarImage.Source = null, clears text
+      - SharedGifPlayer keeps running — it owns the WriteableBitmap
+  Touch:  Card interaction logic, API calls on actions, animation parameters.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ASSETS  (Nesti/Nesti/assets/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+nest_bird.gif
+  Used by:  MainWindow.xaml.cs (BirdImage.Source via SharedGifPlayer)
+  Build:    Embedded as WPF Resource (pack:// URI)
+
+jarvis.gif
+  Used by:  NotificationControl.xaml.cs (AvatarImage.Source via SharedGifPlayer)
+  Build:    Embedded as WPF Resource (pack:// URI)
+
+cross_button_notif_icon.png
+  Used by:  NotificationControl.xaml (DismissBtn Image)
+  Build:    Embedded as WPF Resource (pack:// URI)
+
+snooze_icon.svg
+  Used by:  NotificationControl.xaml — path data inlined directly as a WPF
+            Viewbox + Canvas + Path element. NOT loaded at runtime.
+            The SVG file is for reference only; WPF has no native SVG renderer.
+  Build:    Not referenced in csproj (not needed — path is inlined in XAML)
+
+bird_chirp.mp3
+  Used by:  SoundService.cs (MediaPlayer.Open by file path)
+  Build:    Copied to output directory (PreserveNewest)
+
+snooze_icon.png  /  minimize_button_icon.png  /  cross_button_notif.png
+  Status:   Present in the assets folder but NOT referenced in the current build.
+            These are legacy files kept for reference.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DOCUMENTATION FILES  (Nesti/Nesti/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+guide.txt  (this file)
+  What:   Full file-by-file reference for every file in the project.
+
+websocket.txt
+  What:   Deep-dive on the WebSocket connection flow — startup, URL resolution,
+          connection loop, reconnect, message parsing, deduplication, cleanup.
+          Reference when debugging connection issues or changing WS behaviour.
+
+websocket_req.txt
+  What:   Comparison between this C# implementation and the JS WebSocket
+          documentation provided. Lists what is replicated, what is intentionally
+          absent (browser-specific), and what is missing but could be added.
+          Also answers: RAM impact of real vs dummy WebSocket (~0 difference).
+
+api.txt
+  What:   Documents all REST API calls the app makes:
+          1. mEmpID lookup (GET {API_BASE_URL}?CorpID=Corp\{username})
+          2. Full name lookup (GET {API_BASE_URL}{API_GET_FULLNAME_PATH}?username=...)
+          3. Snooze (POST MARS_SNOOZE_URL)
+          4. Mark as read (POST MARK_AS_READ_URL)
+          Clarifies that there is no Python os.getusername() — equivalent is
+          Environment.UserName in C#.
+
+explanation.txt
+  What:   Explains why WPF uses more than 15 MB baseline RAM — covers JIT,
+          WPF internals, render surfaces, and why this is normal and expected.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+QUICK REFERENCE — WHERE TO MAKE COMMON CHANGES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Change                              │ File(s)
+  ────────────────────────────────────┼──────────────────────────────────────────
+  Point at a different server         │ .env (WS_URL, API_BASE_URL)
+  Change notification display time    │ .env (NOTIFICATION_DURATION_MS)
+  Enable/disable sound                │ .env (SOUND_ENABLED)
+  Switch to test/dummy mode           │ .env (USE_REAL_WEBSOCKET=false)
+  Add a new .env config key           │ .env + Helpers/AppConfig.cs
+  Change WebSocket URL resolution     │ Services/WebSocketService.cs (ResolveUrlAsync)
+  Change reconnect strategy           │ Services/WebSocketService.cs (ScheduleReconnectAsync)
+  Change heartbeat timing             │ Services/WebSocketService.cs (HeartbeatIntervalMs, PongTimeoutMs)
+  Fill in snooze API payload          │ Services/NotificationApiService.cs (SnoozeAsync)
+  Change card appearance              │ Controls/NotificationControl.xaml
+  Change card animations              │ Controls/NotificationControl.xaml.cs (OnLoaded, AnimateOut)
+  Change bird GIF                     │ assets/nest_bird.gif (replace file)
+  Change avatar GIF                   │ assets/jarvis.gif (replace file)
+  Change notification sound           │ assets/bird_chirp.mp3 (replace file)
+  Change snooze icon appearance       │ Controls/NotificationControl.xaml (Path Data)
+  Change window size / position       │ MainWindow.xaml (Width, Height) + MainWindow.xaml.cs (PositionAtBottomRight)
+  Add new notification fields         │ Models/NotificationMessage.cs
+  Change click-through areas          │ MainWindow.xaml.cs (IsInteractive, HitTest)
+  Change DPI behaviour                │ app.manifest
+  Change rendering mode               │ App.xaml.cs

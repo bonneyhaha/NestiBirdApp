@@ -30,6 +30,10 @@ public partial class MainWindow : Window
     private IWebSocketSource? _ws;                          // set in Window_Loaded
     private readonly SoundService _sound;
 
+    // mEmpID returned by the user-ID API — used as userSession in every API payload.
+    // Populated in Window_Loaded after ResolveUrlAsync. Empty in dummy mode.
+    private string _mEmpId = string.Empty;
+
     // ── State ─────────────────────────────────────────────────────────────────
     private readonly HashSet<string> _seenIds      = new();
     private readonly Queue<string>   _seenIdsOrder = new();   // insertion-order shadow for eviction
@@ -74,6 +78,7 @@ public partial class MainWindow : Window
             _ws.StatusChanged        += OnStatusChanged;
 
             var wsUrl = await realWs.ResolveUrlAsync(sysName);
+            _mEmpId = realWs.MemberId;   // store for use in all API payloads
             await _ws.ConnectAsync(wsUrl);
         }
         else
@@ -229,13 +234,14 @@ public partial class MainWindow : Window
     private void AddNotification(NotificationMessage msg)
     {
         var ctrl = new NotificationControl();
-        ctrl.SetData(msg.Id ?? msg.DedupeKey, msg.Title, msg.Body, msg.Url);
+        ctrl.SetData(msg.Id ?? msg.DedupeKey, msg.Title, msg.Body, msg.Url,
+                     msg.UserId, _mEmpId);
         ctrl.DismissRequested += (_, _) => RemoveNotification(ctrl);
         ctrl.SnoozeRequested  += (_, _) => RemoveNotification(ctrl);
 
         NotificationsPanel.Children.Add(ctrl);
 
-        // Auto-dismiss timer
+        // Auto-dismiss timer — Case 1: calls MARK_AS_READ with actionTaken="Automatic Read"
         var timer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(AppConfig.NotificationDurationMs)
@@ -243,6 +249,12 @@ public partial class MainWindow : Window
         timer.Tick += (_, _) =>
         {
             timer.Stop();
+
+            // Only call API in real mode and when user_id != -1
+            if (AppConfig.UseRealWebSocket && msg.UserId != -1 &&
+                !string.IsNullOrEmpty(msg.InstanceId))
+                _ = NotificationApiService.MarkAsReadAsync(msg.InstanceId, _mEmpId, "Automatic Read");
+
             RemoveNotification(ctrl);
         };
         timer.Start();

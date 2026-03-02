@@ -22,8 +22,9 @@ public static class AppConfig
     public static int    WsReconnectMaxAttempts => Int("WS_RECONNECT_MAX_ATTEMPTS", 10);
 
     // ── REST API ──────────────────────────────────────────────────────────────
+    // Called as: GET {ApiBaseUrl}?CorpID=Corp\{windowsLogin}
+    // Response JSON must contain "mEmpID". WS_URL is then {WS_URL}/{mEmpID}.
     public static string ApiBaseUrl          => Str("API_BASE_URL",              "");
-    public static string ApiGetWsUrlPath     => Str("API_GET_WS_URL_PATH",       "");
     public static string ApiGetFullnamePath  => Str("API_GET_FULLNAME_PATH",     "");
 
     // ── App ───────────────────────────────────────────────────────────────────
@@ -47,7 +48,10 @@ public static class AppConfig
     public static string MarsSnoozeUrl  => Str("MARS_SNOOZE_URL",     "");
 
     /// <summary>POST: mark notification as read. URL from MARK_AS_READ_URL in .env.</summary>
-    public static string MarkAsReadUrl  => Str("MARK_AS_READ_URL",    "");
+    public static string MarkAsReadUrl      => Str("MARK_AS_READ_URL",          "");
+
+    /// <summary>Snooze duration in minutes sent in the snooze payload.</summary>
+    public static int SnoozeDurationMinutes => Int("SNOOZE_DURATION_MINUTES",    5);
 
     // ── Helpers ───────────────────────────────────────────────────────────────
     private static string Str(string key, string def) =>

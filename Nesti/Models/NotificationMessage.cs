@@ -29,7 +29,7 @@ public class NotificationMessage
     public string? NotificationType { get; set; }
 
     [JsonPropertyName("user_id")]
-    public string? UserId { get; set; }
+    public int? UserId { get; set; }
 
     [JsonPropertyName("timestamp")]
     public DateTime? Timestamp { get; set; }

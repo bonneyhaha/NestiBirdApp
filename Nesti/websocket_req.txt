@@ -1,0 +1,147 @@
+WEBSOCKET REQUIREMENTS COMPARISON — C# WPF (Nesti) vs JS Documentation
+=========================================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+QUESTION 1 — IS THE os.getusername() → API → {WS_URL}/{id} FLOW IMPLEMENTED?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+YES — as of this update, the flow is:
+
+  Step 1 │ UserHelper.GetSystemUsername()
+         │   → Environment.UserName  (C# equivalent of whoami / os.getlogin())
+         │   → e.g. "jdoe"
+         │
+  Step 2 │ WebSocketService.ResolveUrlAsync("jdoe")
+         │   → GET {API_BASE_URL}{API_GET_USER_ID_PATH}?username=jdoe
+         │   → e.g. GET https://api.example.com/v1/user/ws-id?username=jdoe
+         │
+  Step 3 │ API responds with user's WebSocket channel ID
+         │   Accepted formats:
+         │     JSON:   { "id": "12345" }
+         │     JSON:   { "userId": "12345" }
+         │     JSON:   { "memberId": "12345" }
+         │     Plain:  12345
+         │
+  Step 4 │ Final WebSocket URL:
+         │   {WS_URL}/{returned_id}
+         │   e.g.  ws://107.122.148.219:8080/ws/12345
+         │
+  Step 5 │ ConnectAsync(finalUrl) — WebSocket handshake
+
+.env keys needed:
+  WS_URL                  — base WebSocket URL (e.g. ws://107.122.148.219:8080/ws)
+  API_BASE_URL            — base URL for the user-ID API
+  API_GET_USER_ID_PATH    — path of the endpoint (e.g. /v1/user/ws-id)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+QUESTION 2 — HOW MUCH RAM CHANGES WITH REAL WEBSOCKET vs DUMMY?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Dummy service RAM:
+  Just a DispatcherTimer + counter + static sample array ≈ 2–5 KB
+
+Real WebSocket RAM:
+  ClientWebSocket instance          ~50–100 KB (state machine, TLS context)
+  8 KB ArrayPool receive buffer     ~0 extra (pool is global, already allocated)
+  OS TCP socket buffers             ~64 KB (kernel space, not in process RAM)
+  HttpClient (URL resolution only)  ~300 KB, used once then GC'd
+
+TOTAL DIFFERENCE: ~150–500 KB in managed heap — effectively negligible.
+
+The big RAM consumers in Nesti are GIF rendering and the WPF window surfaces,
+not the WebSocket connection. Switching from dummy to real adds <1 MB.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+QUESTION 3 — ARE WE REPLICATING THE JS WEBSOCKET IMPLEMENTATION?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SHORT ANSWER: Partially. Core patterns match; several JS-specific features
+are intentionally absent because this is a desktop app, not a browser.
+
+
+FEATURE-BY-FEATURE COMPARISON
+──────────────────────────────
+
+  Feature                          │ JS Doc        │ C# Nesti      │ Notes
+  ─────────────────────────────────┼───────────────┼───────────────┼────────────────────────────
+  whoami → API → {WS_URL}/{id}     │ ✅ YES        │ ✅ YES        │ Now implemented (see above)
+  Exponential backoff reconnect    │ ✅ YES        │ ✅ YES        │ Same formula
+  Reconnect jitter (±10%)          │ ✅ YES        │ ❌ NO         │ Not implemented (see below)
+  Max reconnect attempts           │ 5 attempts    │ 10 attempts   │ Different default (configurable)
+  Backoff cap                      │ 30 000 ms     │ 60 000 ms     │ Different cap
+  Connection status events         │ ✅ YES        │ ✅ YES        │ Same states (connecting/connected/reconnecting/failed)
+  Notification deduplication       │ instanceId    │ DedupeKey     │ Same concept, different field name
+  Heartbeat / ping-pong            │ ✅ YES (25s)  │ ❌ NO         │ Not implemented (see below)
+  Connection timeout (15s)         │ ✅ YES        │ ❌ NO         │ Not implemented (see below)
+  Page visibility optimization     │ ✅ YES        │ N/A           │ Desktop app — no browser tabs
+  Network online/offline events    │ ✅ YES        │ N/A           │ Desktop app — not a browser
+  beforeunload / unload cleanup    │ ✅ YES        │ ✅ YES        │ C# uses Window_Closing
+  notificationUpdate message type  │ ✅ YES        │ ❌ NO         │ Only "notification" handled
+  notificationRemoved message type │ ✅ YES        │ ❌ NO         │ Only "notification" handled
+  Binary message support           │ ✅ YES        │ ❌ NO         │ Text-only
+  Singleton pattern                │ ✅ YES        │ ✅ YES        │ One WebSocketService per app
+  Receive buffer pooling           │ ❌ NO         │ ✅ YES        │ ArrayPool<byte> — C# is better here
+  React hook interface             │ ✅ YES        │ N/A           │ Desktop app — not React
+
+
+WHAT IS INTENTIONALLY NOT REPLICATED (DESKTOP APP REASONS)
+──────────────────────────────────────────────────────────
+
+  Page visibility optimization:
+    In a browser, a tab can be hidden or throttled. A WPF window is always
+    "running" unless minimized — the OS does not throttle it the same way.
+    Not applicable.
+
+  Network online/offline browser events:
+    navigator.onLine is a browser API. The C# app handles network failures
+    through WebSocket exceptions → reconnect loop. Equivalent in effect.
+
+  React hook / component lifecycle:
+    This is a WPF application with code-behind, not a React SPA.
+    Event subscriptions are managed in MainWindow.Window_Loaded and
+    Window_Closing, which serve the same purpose.
+
+
+WHAT IS MISSING THAT COULD BE ADDED (IF NEEDED)
+─────────────────────────────────────────────────
+
+  1. HEARTBEAT / PING-PONG
+     JS sends a ping every 25s and expects a pong within 7s.
+     C# has no heartbeat. If the server silently drops the connection
+     without sending a Close frame, the C# app will not detect it until
+     the next send/receive attempt.
+     Solution: add a DispatcherTimer (25s) in WebSocketService that sends
+     {"type":"ping"} and expects {"type":"pong"} within 7s.
+
+  2. RECONNECT JITTER
+     JS adds ±10% random jitter to prevent thundering herd (all clients
+     reconnecting at exactly the same moment after a server restart).
+     C# has none. In a corporate environment with many Nesti instances,
+     this could matter.
+     Solution: add  delay += (int)(delay * (Random.Shared.NextDouble() * 0.2 - 0.1));
+
+  3. CONNECTION TIMEOUT
+     JS closes the socket after 15s if it hasn't connected yet.
+     C# relies on the OS TCP timeout (~75s on Windows).
+     Solution: add a CancellationTokenSource with a 15s timeout to ConnectAsync.
+
+  4. notificationUpdate and notificationRemoved MESSAGE TYPES
+     JS handles three message types. C# only handles "notification".
+     If the server sends update/remove messages they will be silently ignored.
+     Solution: add two more cases in ParseAndRaise that fire separate events,
+     and handle them in MainWindow.
+
+
+SUMMARY
+───────
+  The C# implementation correctly replicates the core behaviour:
+  username resolution, WebSocket URL construction, connection management,
+  and exponential-backoff reconnection.
+
+  The features not replicated are either browser-specific (page visibility,
+  network events, React) — and therefore irrelevant for a desktop app — or
+  are optional reliability improvements (heartbeat, jitter, timeout,
+  update/remove message types) that can be added if required.

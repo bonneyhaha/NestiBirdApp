@@ -19,6 +19,11 @@ public partial class NotificationControl : UserControl
     public event EventHandler? DismissRequested;
     public event EventHandler? SnoozeRequested;
 
+    // ── Per-notification API context ──────────────────────────────────────────
+    // userId == -1 means the notification is a broadcast; skip all API calls.
+    private int?   _userId;
+    private string _mEmpId = string.Empty;
+
     // ── Constructor ───────────────────────────────────────────────────────────
     public NotificationControl()
     {
@@ -31,12 +36,20 @@ public partial class NotificationControl : UserControl
         Loaded += OnLoaded;
     }
 
-    public void SetData(string notificationId, string title, string body, string? url)
+    /// <summary>
+    /// Populates the card.
+    /// userId: the "user id" field from the WebSocket notification (-1 = broadcast, skip API).
+    /// mEmpId: the mEmpID resolved at startup, used as userSession in API payloads.
+    /// </summary>
+    public void SetData(string notificationId, string title, string body, string? url,
+                        int? userId, string mEmpId)
     {
         NotificationId    = notificationId;
         TitleBlock.Text   = title;
         MessageBlock.Text = body;
         NotificationUrl   = url;
+        _userId           = userId;
+        _mEmpId           = mEmpId;
     }
 
     // ── Animations ────────────────────────────────────────────────────────────
@@ -83,12 +96,14 @@ public partial class NotificationControl : UserControl
     }
 
     // ── Event handlers ────────────────────────────────────────────────────────
+
     private void Card_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (!string.IsNullOrEmpty(NotificationUrl))
             OpenUrl(NotificationUrl);
-        if (!string.IsNullOrEmpty(NotificationId))
-            _ = NotificationApiService.MarkAsReadAsync(NotificationId);
+
+        // Treat card click as Manual Read
+        CallMarkAsRead("Manual Read");
         DismissRequested?.Invoke(this, EventArgs.Empty);
     }
 
@@ -102,8 +117,11 @@ public partial class NotificationControl : UserControl
     {
         e.Handled = true;
         (sender as UIElement)?.ReleaseMouseCapture();
-        if (!string.IsNullOrEmpty(NotificationId))
-            _ = NotificationApiService.SnoozeAsync(NotificationId);
+
+        // Only call snooze API in real mode and when userId != -1
+        if (AppConfig.UseRealWebSocket && _userId != -1 && !string.IsNullOrEmpty(NotificationId))
+            _ = NotificationApiService.SnoozeAsync(NotificationId, _mEmpId);
+
         SnoozeRequested?.Invoke(this, EventArgs.Empty);
     }
 
@@ -117,9 +135,23 @@ public partial class NotificationControl : UserControl
     {
         e.Handled = true;
         (sender as UIElement)?.ReleaseMouseCapture();
-        if (!string.IsNullOrEmpty(NotificationId))
-            _ = NotificationApiService.MarkAsReadAsync(NotificationId);
+
+        CallMarkAsRead("Manual Read");
         DismissRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Calls MARK_AS_READ_URL only when:
+    ///   • USE_REAL_WEBSOCKET = true
+    ///   • user_id from the notification is NOT -1
+    ///   • instanceId (NotificationId) is not empty
+    /// </summary>
+    private void CallMarkAsRead(string actionTaken)
+    {
+        if (AppConfig.UseRealWebSocket && _userId != -1 && !string.IsNullOrEmpty(NotificationId))
+            _ = NotificationApiService.MarkAsReadAsync(NotificationId, _mEmpId, actionTaken);
     }
 
     private static void OpenUrl(string url)

@@ -1,0 +1,126 @@
+WEBSOCKET LOGIC — Nesti
+========================
+
+OVERVIEW
+--------
+Nesti uses a persistent WebSocket connection to receive real-time notifications
+from a server. The connection is managed by WebSocketService.cs, which implements
+automatic exponential-backoff reconnection. A dummy mode (DummyWebSocketService)
+fires fake notifications on a timer for local testing without a real server.
+
+
+FILES INVOLVED
+--------------
+  Services/IWebSocketSource.cs         — shared interface (events + ConnectAsync + Dispose)
+  Services/WebSocketService.cs         — real WebSocket implementation
+  Services/DummyWebSocketService.cs    — test stub
+  Helpers/AppConfig.cs                 — reads WS_URL, WS_RECONNECT_* from .env
+  MainWindow.xaml.cs (Window_Loaded)   — wires everything up on startup
+
+
+STARTUP FLOW (MainWindow.xaml.cs → Window_Loaded)
+--------------------------------------------------
+1. UserHelper.GetSystemUsername() reads the Windows login name (Environment.UserName).
+
+2. AppConfig.UseRealWebSocket (.env flag USE_REAL_WEBSOCKET) decides which branch:
+
+   REAL MODE (USE_REAL_WEBSOCKET = true):
+     a. Creates WebSocketService instance.
+     b. Subscribes to NotificationReceived and StatusChanged events.
+     c. Calls ResolveUrlAsync(username) to determine the WebSocket URL (see below).
+     d. Calls ConnectAsync(wsUrl) to start the connection loop.
+
+   DUMMY MODE (USE_REAL_WEBSOCKET = false):
+     a. Creates DummyWebSocketService instance.
+     b. Subscribes to the same events.
+     c. Calls ConnectAsync("") — URL is ignored; dummy fires notifications on a timer.
+
+
+URL RESOLUTION (WebSocketService.ResolveUrlAsync)
+-------------------------------------------------
+If both API_BASE_URL and API_GET_WS_URL_PATH are set in .env:
+  → Performs an HTTP GET to: {API_BASE_URL}{API_GET_WS_URL_PATH}?username={username}
+  → Parses the JSON response for a "wsUrl" property.
+  → Uses that value as the WebSocket URL.
+
+If the API call is not configured or fails:
+  → Falls back to WS_URL from .env (default: wss://localhost:8080/ws).
+
+
+CONNECTION LOOP (WebSocketService.TryConnectAsync + ListenAsync)
+----------------------------------------------------------------
+TryConnectAsync:
+  - Cancels any previous connection and creates a fresh ClientWebSocket.
+  - Fires StatusChanged("connecting") or ("reconnecting") depending on attempt number.
+  - Calls ws.ConnectAsync(uri) to perform the WebSocket handshake.
+  - On success: fires StatusChanged("connected"), then launches ListenAsync fire-and-forget.
+  - On failure: calls ScheduleReconnectAsync.
+
+ListenAsync:
+  - Rents an 8 KB buffer from ArrayPool<byte>.Shared (reused across reconnects, no allocation).
+  - Loops: calls ws.ReceiveAsync until EndOfMessage is true (handles multi-frame messages).
+  - On WebSocketMessageType.Close from server: sets reconnect = true and exits.
+  - On any exception (network drop, etc.): sets reconnect = true and exits.
+  - Finally block: always returns the buffer to ArrayPool.
+  - If reconnect is needed: calls ScheduleReconnectAsync.
+
+ScheduleReconnectAsync:
+  - Increments _attempt counter.
+  - If _attempt > WS_RECONNECT_MAX_ATTEMPTS (.env, default 10): fires StatusChanged("failed") and stops.
+  - Otherwise: waits exponential-backoff delay = min(WS_RECONNECT_BASE_MS × 2^(attempt-1), 60000 ms).
+    Example with base=2000ms: 2s → 4s → 8s → 16s → 32s → 60s → 60s → ...
+  - Then calls TryConnectAsync again.
+
+
+MESSAGE PARSING (ParseAndRaise)
+-------------------------------
+Each received text frame is parsed as JSON into a NotificationMessage object:
+  {
+    "id":    "...",     // unique notification ID (used for dedup + API calls)
+    "title": "...",     // notification title shown in the card
+    "body":  "...",     // notification body text
+    "url":   "..."      // optional URL opened when the card is clicked
+  }
+
+If JSON is valid → fires NotificationReceived event.
+If JSON is malformed → silently ignored.
+
+
+NOTIFICATION HANDLING (MainWindow.OnNotificationReceived)
+---------------------------------------------------------
+- Always dispatched to the UI thread via Dispatcher.Invoke.
+- Deduplication: TryAddSeen checks a HashSet<string> of seen IDs (capped at 500 entries,
+  oldest evicted). Duplicate messages are dropped silently.
+- If _birdHidden == true, the bird and panel are made visible again.
+- If active notifications >= MAX_NOTIFICATIONS (.env, default 5): oldest card is evicted.
+- AddNotification creates a NotificationControl, attaches dismiss/snooze handlers,
+  adds it to the StackPanel, and starts an auto-dismiss DispatcherTimer
+  (NOTIFICATION_DURATION_MS, default 10 000 ms).
+
+
+STATUS EVENTS
+-------------
+OnStatusChanged logs to Debug output. Possible values:
+  "connecting"    — first connection attempt
+  "connected"     — handshake succeeded
+  "reconnecting"  — connection lost, retrying
+  "failed"        — max reconnect attempts exhausted
+
+
+CLEANUP (Window_Closing)
+------------------------
+- _cts.Cancel()  stops the listen loop.
+- _ws.Dispose()  closes the WebSocket.
+- All active DispatcherTimers are stopped.
+- SoundService is disposed.
+
+
+.ENV KEYS USED
+--------------
+  WS_URL                    — WebSocket server URL (default: wss://localhost:8080/ws)
+  WS_RECONNECT_BASE_MS      — base delay for exponential backoff (default: 2000)
+  WS_RECONNECT_MAX_ATTEMPTS — max reconnect attempts before "failed" (default: 10)
+  USE_REAL_WEBSOCKET        — true = real server, false = dummy test mode (default: true)
+  DUMMY_INTERVAL_MS         — how often dummy mode fires a fake notification (default: 5000)
+  API_BASE_URL              — base URL for the REST API (used in URL resolution)
+  API_GET_WS_URL_PATH       — endpoint path for resolving WebSocket URL per user

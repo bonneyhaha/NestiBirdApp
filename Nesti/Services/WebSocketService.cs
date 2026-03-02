@@ -26,36 +26,58 @@ public sealed class WebSocketService : IWebSocketSource
     private string                     _url  = string.Empty;
     private int                        _attempt;
 
+    // ── Heartbeat ─────────────────────────────────────────────────────────────
+    private const int HeartbeatIntervalMs = 25_000;
+    private const int PongTimeoutMs       =  7_000;
+    private Timer?                     _heartbeatTimer;
+    private CancellationTokenSource?   _pongCts;
+
     public bool IsConnected => _ws?.State == WebSocketState.Open;
+
+    /// <summary>
+    /// The mEmpID returned by the API during URL resolution.
+    /// Used as the userSession field in all notification action API payloads.
+    /// Empty string if API_BASE_URL is not configured or the call failed.
+    /// </summary>
+    public string MemberId { get; private set; } = string.Empty;
 
     // ── Public API ────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Resolves the WebSocket URL:
-    ///   1. If API_GET_WS_URL_PATH is configured, calls the API.
-    ///   2. Otherwise falls back to WS_URL from .env.
+    ///   1. Reads the Windows login name (Environment.UserName → e.g. "jdoe").
+    ///   2. Builds CorpID as "Corp\{username}"  →  "Corp\jdoe".
+    ///   3. Calls: GET {API_BASE_URL}?CorpID=Corp\{username}
+    ///   4. Reads "mEmpID" from the JSON response.
+    ///   5. Returns {WS_URL}/{mEmpID}  so each user connects to their own channel.
+    ///   6. Falls back to WS_URL as-is if API_BASE_URL is empty or the call fails.
     /// </summary>
     public async Task<string> ResolveUrlAsync(string username)
     {
-        var path    = AppConfig.ApiGetWsUrlPath;
-        var baseUrl = AppConfig.ApiBaseUrl;
+        var apiBase = AppConfig.ApiBaseUrl;
+        var wsBase  = AppConfig.WsUrl.TrimEnd('/');
 
-        if (!string.IsNullOrEmpty(path) && !string.IsNullOrEmpty(baseUrl))
+        if (!string.IsNullOrEmpty(apiBase))
         {
             try
             {
                 using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-                var apiUrl = $"{baseUrl.TrimEnd('/')}{path}?username={Uri.EscapeDataString(username)}";
-                var json   = await client.GetStringAsync(apiUrl);
-                using var doc = JsonDocument.Parse(json);
-                if (doc.RootElement.TryGetProperty("wsUrl", out var prop) &&
-                    prop.GetString() is { Length: > 0 } resolved)
-                    return resolved;
+                var corpId = $"Corp\\{username}";
+                var apiUrl = $"{apiBase}?CorpID={Uri.EscapeDataString(corpId)}";
+                var raw    = await client.GetStringAsync(apiUrl);
+
+                using var doc = JsonDocument.Parse(raw);
+                if (doc.RootElement.TryGetProperty("mEmpID", out var prop) &&
+                    prop.GetString() is { Length: > 0 } mEmpId)
+                {
+                    MemberId = mEmpId;
+                    return $"{wsBase}/{mEmpId}";
+                }
             }
-            catch { /* fall through */ }
+            catch { /* fall through to default URL */ }
         }
 
-        return AppConfig.WsUrl;
+        return wsBase;
     }
 
     /// <summary>Starts the connection loop. Call once.</summary>
@@ -68,6 +90,7 @@ public sealed class WebSocketService : IWebSocketSource
 
     public void Dispose()
     {
+        StopHeartbeat();
         _cts.Cancel();
         _ws?.Dispose();
     }
@@ -76,6 +99,8 @@ public sealed class WebSocketService : IWebSocketSource
 
     private async Task TryConnectAsync()
     {
+        StopHeartbeat();
+
         // Cancel any previous listen loop
         _cts.Cancel();
         _cts = new CancellationTokenSource();
@@ -86,9 +111,14 @@ public sealed class WebSocketService : IWebSocketSource
 
         try
         {
-            await _ws.ConnectAsync(new Uri(_url), _cts.Token);
+            // 15-second connection timeout linked with the main cancellation token
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            using var linkedCts  = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, timeoutCts.Token);
+
+            await _ws.ConnectAsync(new Uri(_url), linkedCts.Token);
             _attempt = 0;
             Raise("connected");
+            StartHeartbeat();
             _ = ListenAsync(_cts.Token);   // fire-and-forget
         }
         catch (Exception)
@@ -145,6 +175,16 @@ public sealed class WebSocketService : IWebSocketSource
     {
         try
         {
+            using var doc = JsonDocument.Parse(json);
+
+            // Handle pong — cancels the 7s timeout to confirm the link is alive
+            if (doc.RootElement.TryGetProperty("type", out var typeProp) &&
+                typeProp.GetString() == "pong")
+            {
+                _pongCts?.Cancel();
+                return;
+            }
+
             var msg = JsonSerializer.Deserialize<NotificationMessage>(json);
             if (msg is not null)
                 NotificationReceived?.Invoke(this, msg);
@@ -161,10 +201,12 @@ public sealed class WebSocketService : IWebSocketSource
             return;
         }
 
-        // Exponential back-off capped at 60 seconds
+        // Exponential back-off capped at 60 s, with ±10% jitter to prevent
+        // thundering-herd when many clients reconnect simultaneously.
         var delay = Math.Min(
             AppConfig.WsReconnectBaseMs * (int)Math.Pow(2, _attempt - 1),
             60_000);
+        delay += (int)(delay * (Random.Shared.NextDouble() * 0.2 - 0.1));
 
         Raise("reconnecting");
 
@@ -172,6 +214,43 @@ public sealed class WebSocketService : IWebSocketSource
         catch (OperationCanceledException) { return; }
 
         await TryConnectAsync();
+    }
+
+    // ── Heartbeat ─────────────────────────────────────────────────────────────
+
+    private void StartHeartbeat() =>
+        _heartbeatTimer = new Timer(OnHeartbeatTick, null, HeartbeatIntervalMs, HeartbeatIntervalMs);
+
+    private void StopHeartbeat()
+    {
+        _heartbeatTimer?.Dispose();
+        _heartbeatTimer = null;
+        _pongCts?.Cancel();
+        _pongCts?.Dispose();
+        _pongCts = null;
+    }
+
+    private async void OnHeartbeatTick(object? state)
+    {
+        if (_ws?.State != WebSocketState.Open) return;
+
+        try
+        {
+            var ping  = JsonSerializer.Serialize(new { type = "ping", timestamp = DateTime.UtcNow.ToString("O") });
+            var bytes = Encoding.UTF8.GetBytes(ping);
+            await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cts.Token);
+
+            // If no pong arrives within 7 s, abort the socket — ListenAsync will reconnect.
+            _pongCts?.Cancel();
+            _pongCts?.Dispose();
+            _pongCts = new CancellationTokenSource(PongTimeoutMs);
+            _pongCts.Token.Register(() =>
+            {
+                if (_ws?.State == WebSocketState.Open)
+                    _ws.Abort();
+            });
+        }
+        catch { }
     }
 
     private void Raise(string status) =>

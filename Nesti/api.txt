@@ -1,0 +1,218 @@
+API LOGIC — Nesti
+==================
+
+NOTE ON mem_id / os.getusername
+--------------------------------
+The codebase does NOT use Python. This is a C# WPF app.
+The equivalent of Python's os.getlogin() is Environment.UserName in C#.
+The app reads the Windows login name, calls an API to get "mEmpID" from it,
+and uses that mEmpID both to form the WebSocket URL and as the "userSession"
+field in all notification action API payloads.
+
+
+FILES INVOLVED
+--------------
+  Helpers/UserHelper.cs              — reads Windows username
+  Services/WebSocketService.cs       — calls mEmpID lookup API, stores MemberId
+  Services/NotificationApiService.cs — snooze + mark-as-read POST calls
+  Helpers/AppConfig.cs               — all API URLs and settings from .env
+  Controls/NotificationControl.xaml.cs — triggers API calls on user actions
+  MainWindow.xaml.cs                 — triggers API call on auto-dismiss timer
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. READING THE WINDOWS USERNAME
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+File: Helpers/UserHelper.cs → GetSystemUsername()
+
+  Environment.UserName
+  ?? Environment.GetEnvironmentVariable("USERNAME")
+  ?? "Guest"
+
+Returns the Windows login name only (e.g. "jdoe" — no domain prefix).
+Called once in MainWindow.Window_Loaded, stored as `sysName`.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. API CALL: GET mEmpID (RESOLVE WEBSOCKET CHANNEL)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+File: Services/WebSocketService.cs → ResolveUrlAsync(string username)
+
+Purpose:
+  Looks up the employee's mEmpID using their Windows login name.
+  mEmpID is used for two things:
+    1. Appended to WS_URL to form the per-user WebSocket channel
+    2. Stored as MemberId — sent as "userSession" in all action payloads
+
+Trigger:
+  Called once in MainWindow.Window_Loaded when USE_REAL_WEBSOCKET = true.
+
+.env key required:
+  API_BASE_URL  — full endpoint URL (no path needed)
+
+Request:
+  GET {API_BASE_URL}?CorpID=Corp\{windowsLoginName}
+  Example: GET https://api.example.com/user/id?CorpID=Corp\jdoe
+  (URL-encoded: ?CorpID=Corp%5Cjdoe)
+
+Expected JSON response:
+  {
+    "mEmpID": "12345",
+    ... (other fields ignored)
+  }
+
+Behavior:
+  - If "mEmpID" is found and non-empty:
+      → WebSocketService.MemberId = "12345"
+      → Returns "{WS_URL}/12345"  (e.g. wss://server.com/ws/12345)
+  - If API_BASE_URL is blank, or the call fails/times out (5s timeout):
+      → MemberId stays ""
+      → Returns WS_URL as-is (no user suffix)
+
+The resolved mEmpID is stored in MainWindow._mEmpId immediately after
+this call and passed to every notification card and action payload.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. API CALL: GET EMPLOYEE FULL NAME (OPTIONAL, UNUSED IN UI)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+File: Helpers/UserHelper.cs → GetFullNameAsync(string username)
+
+Purpose:
+  Resolves a Windows login name to a display name ("John Doe").
+  Available but not currently wired into the main UI flow.
+
+.env keys required:
+  API_BASE_URL           — base server URL
+  API_GET_FULLNAME_PATH  — path appended to base
+
+Request:
+  GET {API_BASE_URL}{API_GET_FULLNAME_PATH}?username={windowsLoginName}
+
+Expected JSON response:
+  { "fullName": "John Doe" }
+
+Behavior:
+  - Returns "fullName" value if present.
+  - Returns null if not configured or the call fails.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. API CALL: MARK AS READ
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+File: Services/NotificationApiService.cs → MarkAsReadAsync(...)
+
+Signature:
+  MarkAsReadAsync(string instanceId, string userSession, string actionTaken)
+
+Called in THREE situations:
+
+  CASE 1 — Auto-dismiss (timer expires)
+    Caller:     MainWindow.xaml.cs (DispatcherTimer.Tick)
+    actionTaken: "Automatic Read"
+
+  CASE 2 — Dismiss button clicked  OR  card body clicked
+    Caller:     NotificationControl.xaml.cs (Dismiss_MouseUp / Card_Click)
+    actionTaken: "Manual Read"
+
+Skip conditions (either skips ALL calls):
+  • USE_REAL_WEBSOCKET = false  (dummy/test mode)
+  • notification's user_id == -1  (broadcast notification — no personal action)
+  Card always slides out regardless.
+
+.env key required:
+  MARK_AS_READ_URL  — full POST URL
+
+Request:
+  POST {MARK_AS_READ_URL}
+  Content-Type: application/json
+  Body:
+  {
+    "instance_id":  "{instanceId from WebSocket notification}",
+    "userSession":  "{mEmpID resolved at startup}",
+    "isClicked":    true,
+    "actionTaken":  "Automatic Read"   (or "Manual Read")
+  }
+
+Behavior:
+  - Fire-and-forget; never throws to the caller.
+  - If MARK_AS_READ_URL is blank, the call is skipped entirely.
+  - HTTP errors are silently swallowed.
+  - No local storage — server is the source of truth.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. API CALL: SNOOZE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+File: Services/NotificationApiService.cs → SnoozeAsync(...)
+
+Signature:
+  SnoozeAsync(string instanceId, string userSession)
+
+Called in ONE situation:
+
+  CASE 3 — Snooze button clicked
+    Caller: NotificationControl.xaml.cs (Snooze_MouseUp)
+
+Skip conditions:
+  • USE_REAL_WEBSOCKET = false  (dummy/test mode)
+  • notification's user_id == -1  (broadcast — skip)
+  Card always slides out regardless.
+
+.env keys required:
+  MARS_SNOOZE_URL         — full POST URL
+  SNOOZE_DURATION_MINUTES — integer, default 5
+
+Request:
+  POST {MARS_SNOOZE_URL}
+  Content-Type: application/json
+  Body:
+  {
+    "instance_id":           "{instanceId from WebSocket notification}",
+    "userSession":           "{mEmpID resolved at startup}",
+    "snoozeDurationMinutes": 5   (value from SNOOZE_DURATION_MINUTES in .env)
+  }
+
+Behavior:
+  - Fire-and-forget; never throws.
+  - If MARS_SNOOZE_URL is blank, call is skipped.
+  - HTTP errors are silently swallowed.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WHERE instanceId AND userSession COME FROM
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  instanceId   = notification.instanceId field from the WebSocket message
+                 Each WebSocket notification has a unique instanceId (UUID).
+                 Stored in NotificationControl.NotificationId at card creation.
+
+  userSession  = mEmpID from API call #2 above.
+                 Resolved once at startup → stored in WebSocketService.MemberId
+                 → copied to MainWindow._mEmpId
+                 → passed to every NotificationControl via SetData()
+                 → passed as second argument to every API call.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SUMMARY TABLE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  API Call                  │ Method │ Trigger               │ Skipped when
+  ──────────────────────────┼────────┼───────────────────────┼──────────────────────────
+  mEmpID lookup             │ GET    │ App startup           │ API_BASE_URL blank
+  Full name lookup          │ GET    │ App startup (optional)│ Not configured
+  Mark as read (auto)       │ POST   │ Timer expires         │ user_id==-1 or dummy mode
+  Mark as read (manual)     │ POST   │ Dismiss / card click  │ user_id==-1 or dummy mode
+  Snooze                    │ POST   │ Snooze button         │ user_id==-1 or dummy mode
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ALL RELEVANT .ENV KEYS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  API_BASE_URL            — full URL for the mEmpID lookup  (GET ?CorpID=Corp\{login})
+  API_GET_FULLNAME_PATH   — path appended to API_BASE_URL for display name
+  MARK_AS_READ_URL        — full POST URL for mark-as-read
+  MARS_SNOOZE_URL         — full POST URL for snooze
+  SNOOZE_DURATION_MINUTES — integer sent in snooze payload  (default: 5)
+  USE_REAL_WEBSOCKET      — false disables all POST API calls entirely
