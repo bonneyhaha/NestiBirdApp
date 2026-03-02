@@ -1,0 +1,696 @@
+PROJECT GUIDE — Nesti Bird Assistant
+======================================
+A beginner-friendly, in-depth explanation of every piece of this project.
+No prior knowledge of C#, WPF, or Windows desktop programming required.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PART 1 — WHAT IS THIS APP?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Nesti is a small Windows desktop program that sits in the bottom-right
+corner of your screen. You can see through it — it is a transparent
+overlay on top of everything else. A small animated bird lives there.
+
+When a notification arrives from a server (e.g. "Meeting in 5 minutes"),
+a card slides in from the right side of the screen with the message.
+You can:
+  • Click the card → opens a URL in your browser, marks it as read
+  • Click the ✕ dismiss button → slides the card out, marks it as read
+  • Click the ⏰ snooze button → slides the card out, asks the server to
+    re-send it after 5 minutes
+  • Do nothing → after 10 seconds the card auto-dismisses itself
+
+The bird has two hover buttons (appear only when you hover over the bird):
+  [–] Hide  → hides Nesti until the next notification arrives
+  [✕] Close → exits the program entirely
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PART 2 — WHAT IS C#?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+C# (pronounced "C sharp") is a programming language made by Microsoft.
+It is similar to Java or Python but is designed to work very well on
+Windows and to be fast.
+
+Every C# program runs on top of ".NET" — a runtime that provides things
+like garbage collection (automatic memory management), networking, and
+other built-in tools so you do not have to write them yourself.
+
+This project uses .NET 8, which is the version released in 2023.
+
+C# code lives in files ending in ".cs".
+Example: MainWindow.xaml.cs, AppConfig.cs, WebSocketService.cs
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PART 3 — WHAT IS WPF?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+WPF stands for "Windows Presentation Foundation". It is Microsoft's
+framework for building Windows desktop applications with rich visual
+interfaces.
+
+Think of WPF as two things working together:
+
+  1. XAML (pronounced "zammel") — a special XML-based language for
+     describing what the window LOOKS like. Buttons, images, text boxes,
+     layouts — all described in .xaml files. It is similar to HTML for
+     web pages.
+
+  2. Code-behind — a matching .cs file that describes what the app
+     DOES when the user interacts with it (button clicks, timers, etc.)
+
+Example pair:
+  MainWindow.xaml     ← describes the visual layout
+  MainWindow.xaml.cs  ← describes the behaviour
+
+WPF renders everything using the graphics system (Direct3D by default,
+or software-only rendering as this project uses for lower RAM).
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PART 4 — WHAT IS A WEBSOCKET?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Normally when your browser asks a website "do you have any news for me?"
+it uses HTTP — a request-response pattern. The browser sends a question,
+the server replies, and the connection closes. To get updates, the browser
+has to keep asking again and again (polling).
+
+A WebSocket is a persistent, two-way connection. Once opened:
+  • The SERVER can push messages to the client at any time.
+  • The CLIENT can send messages to the server at any time.
+  • The connection stays open until one side closes it.
+
+This is perfect for real-time notifications — the server simply pushes
+"here is a new notification" as soon as it happens.
+
+WebSocket URLs start with  ws://  or  wss://  (the "s" means encrypted,
+like https vs http).
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PART 5 — HOW THE WHOLE APP STARTS UP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+When you double-click Nesti.exe, this is what happens step by step:
+
+STEP 1 — App.xaml.cs starts
+  The very first thing that runs is App.xaml.cs → OnStartup().
+  It immediately tells WPF: "use software rendering only, no GPU".
+  This prevents Direct3D from allocating video memory, keeping RAM low.
+  Then it hands control to MainWindow.
+
+STEP 2 — .env file is loaded
+  Before drawing anything, the app reads a file called ".env" sitting
+  next to the .exe. This file contains configuration like:
+    WS_URL=wss://your-server.com/ws
+    USE_REAL_WEBSOCKET=true
+    NOTIFICATION_DURATION_MS=10000
+  These values are read by Helpers/AppConfig.cs and made available to
+  every other part of the program.
+
+STEP 3 — The window appears
+  MainWindow.xaml draws a fullscreen transparent window. It has:
+    • AllowsTransparency=True — the window can be see-through
+    • Background=Transparent — the default background is invisible
+    • WindowStyle=None — no title bar, no borders
+    • Topmost=True — always stays above other windows
+    • ShowInTaskbar=False — does not appear in the Windows taskbar
+  The window covers the entire screen but you click through empty areas
+  as if it is not there.
+
+STEP 4 — Click-through is set up
+  Windows has a concept of "hit testing" — when you click, Windows asks
+  each window "did the click land on you?". Nesti hooks into this using
+  a WndProc (Windows message procedure). For empty areas it returns
+  HTTRANSPARENT which means "ignore me, pass the click to what is under
+  me". For the bird and notification cards it returns HTCLIENT so those
+  areas DO receive clicks.
+
+STEP 5 — Username is read
+  Helpers/UserHelper.cs calls Environment.UserName.
+  This gives the Windows login name — e.g. "jdoe" — without a domain.
+  This is exactly what Python's os.getlogin() would return.
+
+STEP 6 — mEmpID is looked up
+  The app makes an HTTP GET request to the employee API:
+    GET {API_BASE_URL}?CorpID=Corp\jdoe
+  The server responds with JSON:
+    { "mEmpID": "12345", ... }
+  The app extracts "12345" and stores it as MemberId.
+  This ID is used for two purposes:
+    • Forms the WebSocket channel: wss://server.com/ws/12345
+    • Sent as "userSession" in all notification action API payloads
+
+STEP 7 — WebSocket connects
+  WebSocketService.cs opens a persistent connection to the resolved URL.
+  It sets a 15-second timeout — if the server does not answer in 15
+  seconds, it gives up and tries again later.
+
+STEP 8 — Heartbeat starts
+  Every 25 seconds, the app sends a "ping" message to the server:
+    { "type": "ping", "timestamp": "..." }
+  The server is expected to reply with:
+    { "type": "pong", "timestamp": "..." }
+  If no pong arrives within 7 seconds, the connection is assumed dead
+  and a reconnect is triggered.
+
+STEP 9 — Reconnect strategy
+  If the connection drops, the app waits and tries again. Each attempt
+  waits twice as long as the previous one (exponential back-off), plus
+  a small random amount of time (jitter) to avoid all clients hammering
+  the server at exactly the same moment. It gives up after 10 attempts.
+  Example wait times: 2s, 4s, 8s, 16s, 32s, 60s, 60s... (capped at 60s)
+
+STEP 10 — Bird animation starts
+  The animated GIF of the bird plays continuously using a custom GIF
+  player that is very memory-efficient (explained in Part 7).
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PART 6 — HOW A NOTIFICATION IS DISPLAYED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+When the WebSocket receives a message from the server, here is the flow:
+
+STEP 1 — JSON arrives
+  The message is a JSON string like:
+  {
+    "instanceId":       "421c6789-...",
+    "title":            "Meeting Reminder",
+    "message":          "Team standup in 5 minutes.",
+    "user_id":          1234,
+    "url":              "http://your-app.com/meetings",
+    "type":             "notification",
+    "displayDuration":  5
+  }
+
+STEP 2 — Parsed into a C# object
+  JSON is a text format. C# cannot work with raw text directly.
+  The app uses System.Text.Json to convert it into a
+  NotificationMessage object — a C# class with named properties:
+    msg.Title      == "Meeting Reminder"
+    msg.Message    == "Team standup in 5 minutes."
+    msg.UserId     == 1234
+    msg.InstanceId == "421c6789-..."
+
+STEP 3 — Deduplication check
+  The app keeps a HashSet (a set with no duplicates) of instanceIds
+  it has already shown. If this instanceId is already in the set, the
+  notification is silently ignored. This prevents showing the same
+  notification twice if the server sends it more than once.
+
+STEP 4 — "pong" check
+  If the message type is "pong", it is NOT a notification — it is the
+  server's heartbeat reply. The app handles it internally (cancels the
+  pong timeout) and does not show any card.
+
+STEP 5 — Card is created
+  MainWindow.cs creates a new NotificationControl (a UserControl — a
+  reusable WPF component defined in Controls/NotificationControl.xaml).
+  It calls ctrl.SetData() to fill in:
+    • The title and body text
+    • The instanceId (for API calls later)
+    • The user_id (to decide whether to skip API calls)
+    • The mEmpId (used as "userSession" in payloads)
+
+STEP 6 — Card slides in
+  An animation runs: the card starts 400px off the right edge of the
+  screen and slides to position 0 over 1000ms using a "back ease" —
+  a slight overshoot that gives it a bouncy feel.
+
+STEP 7 — Sound plays
+  SoundService.cs plays bird_chirp.mp3 using MediaPlayer.
+  If SOUND_ENABLED=false in .env, this is skipped.
+
+STEP 8 — Auto-dismiss timer starts
+  A DispatcherTimer is created. After NOTIFICATION_DURATION_MS (default
+  10 seconds), it fires. The card slides out and MarkAsRead is called
+  with actionTaken = "Automatic Read".
+
+STEP 9 — Card limit enforced
+  If more than MAX_NOTIFICATIONS (default 5) cards are showing, the
+  oldest one is dismissed automatically to make room for the new one.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PART 7 — THE GIF PLAYER (SharedGifPlayer.cs)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+WHY A CUSTOM GIF PLAYER?
+
+WPF does not have built-in GIF animation. There are third-party libraries
+(like WpfAnimatedGif) that handle it, but they work by decoding every
+frame of the GIF and storing all frames in memory. If the GIF has 60
+frames, it stores 60 complete images. If 5 notification cards each show
+the same GIF, that is 60 × 5 = 300 images in RAM. This caused 300 MB+
+memory usage.
+
+THE SOLUTION — Shared WriteableBitmap
+
+A WriteableBitmap is a special WPF bitmap that you can draw pixel data
+into directly from code. Nesti uses ONE WriteableBitmap per GIF URI.
+All UI elements that want to display that GIF simply point at the
+same WriteableBitmap. When the next frame is ready, the single
+WriteableBitmap is updated in-place, and ALL UI elements update instantly
+because they all share the same object.
+
+This means 5 notification cards showing the same GIF use the same RAM as
+1 card showing it. The memory is O(1) — constant, regardless of how many
+cards are open.
+
+HOW GIF COMPOSITING WORKS
+
+GIFs are not always simple "replace the whole image with the next frame".
+They have:
+  • Frame offsets: each frame might only cover a small rectangular area
+    of the full image, not the entire canvas.
+  • Disposal methods: instructions for what to do with the previous frame
+    before drawing the next one.
+    0/1 = leave it (draw new frame on top of old)
+    2   = clear to background colour (transparent for our purposes)
+    3   = restore the canvas to what it was before the previous frame
+
+Nesti keeps a byte array called _canvas that represents the full image
+at all times. For each new frame it:
+  1. Applies the disposal instruction for the previous frame
+  2. Blends the new frame pixels into the canvas (per-pixel alpha blending)
+  3. Copies the final canvas bytes into the WriteableBitmap
+
+MEMORY EFFICIENCY
+
+Because we never store the decoded frame list — we decode one frame,
+composite it, write it to the bitmap, then throw the decoded frame away —
+the memory is just:
+  • One WriteableBitmap (the canvas in VRAM/system RAM)
+  • One _canvas byte array (width × height × 4 bytes)
+  • One small rent from ArrayPool for the current frame decode
+  All temporary; the GC cleans up immediately.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PART 8 — THE CONFIGURATION SYSTEM (.env + AppConfig.cs)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+THE .env FILE
+
+Rather than hard-coding server URLs into the program (which would require
+recompiling every time the server address changes), all settings live in
+a plain text file called ".env" that sits next to the .exe:
+
+  WS_URL=wss://your-server.com/ws
+  API_BASE_URL=http://your-api.com/api/user/id
+  USE_REAL_WEBSOCKET=true
+  NOTIFICATION_DURATION_MS=10000
+
+To change the server, you edit this file and restart the app. No
+recompile needed. This is a very common pattern in server-side apps but
+less common on Windows desktop — Nesti borrows the idea.
+
+AppConfig.cs
+
+This file uses a library called DotNetEnv to read the .env file into
+memory when the app starts. Then AppConfig exposes typed properties:
+
+  public static string  WsUrl         => Str("WS_URL", "wss://...");
+  public static bool    UseRealWebSocket => Bool("USE_REAL_WEBSOCKET", true);
+  public static int     NotifDurationMs  => Int("NOTIFICATION_DURATION_MS", 10000);
+
+Any other file in the project can call AppConfig.WsUrl and get the value.
+If the key is missing from .env, the default value (the second argument)
+is returned.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PART 9 — THE API CALLS (NotificationApiService.cs)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+After the user interacts with a notification card, the app needs to
+tell the server what happened. It does this with HTTP POST requests.
+
+MARK AS READ
+
+Called in three situations:
+  1. Auto-dismiss: timer ran out → "Automatic Read"
+  2. Dismiss button clicked → "Manual Read"
+  3. Card body clicked → "Manual Read" (also opens the URL)
+
+POST {MARK_AS_READ_URL}
+Body:
+{
+  "instance_id":  "421c6789-...",
+  "userSession":  "12345",       ← the mEmpID from startup
+  "isClicked":    true,
+  "actionTaken":  "Manual Read"
+}
+
+SNOOZE
+
+Called when the snooze button (⏰) is clicked:
+
+POST {MARS_SNOOZE_URL}
+Body:
+{
+  "instance_id":           "421c6789-...",
+  "userSession":           "12345",
+  "snoozeDurationMinutes": 5
+}
+
+SKIP CONDITIONS
+
+Neither API is called when:
+  • USE_REAL_WEBSOCKET = false  (test/dummy mode — no real server)
+  • user_id == -1 in the notification (broadcast notification — it was
+    sent to everyone, not a specific person, so no personal action needed)
+
+The card always slides out regardless.
+
+FIRE AND FORGET
+
+These API calls are "fire and forget" — the app sends the request but
+does not wait for a response before continuing. If the server is slow or
+returns an error, the error is silently swallowed. The user experience is
+not blocked. This is achieved with the C# pattern:
+  _ = NotificationApiService.MarkAsReadAsync(...);
+The underscore means "I am intentionally ignoring the return value".
+
+SINGLE HttpClient
+
+HttpClient is the C# object for making HTTP requests. Creating a new
+one for every request wastes memory and can exhaust network connections.
+NotificationApiService uses a single static HttpClient shared across all
+requests. This is a well-known best practice in .NET.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PART 10 — RAM OPTIMIZATIONS (WHY THIS APP IS SMALL)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+WPF is known for being heavy on RAM. These are the specific steps taken
+to make Nesti lean:
+
+1. SOFTWARE-ONLY RENDERING
+   Normal WPF uses Direct3D (your GPU) to render. This allocates a
+   Direct3D device, swap chains, and VRAM on top of normal RAM. For a
+   simple notification overlay this is overkill. By setting:
+     RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
+   before the window opens, WPF never touches the GPU at all. Pure CPU
+   rendering. Saves 30–80 MB depending on hardware.
+
+2. SYSTEM DPI MANIFEST (NOT PerMonitorV2)
+   High-DPI monitors (4K) cause WPF to allocate larger render targets.
+   With PerMonitorV2 DPI awareness, WPF reallocates these targets every
+   time the window moves to a different monitor. By using the older
+   System V1 awareness in app.manifest, WPF creates one fixed-size
+   render target at startup and never reallocates. Saves peak RAM on
+   multi-monitor 4K setups.
+
+3. TRANSPARENT WINDOW WITHOUT EXTRA SURFACES
+   AllowsTransparency=True + Background=Transparent uses the Windows
+   WS_EX_LAYERED window style, which does per-pixel transparency using
+   the existing window surface. No extra GPU surfaces are allocated.
+
+4. SHADOW VIA OFFSET BORDER (NO DropShadowEffect)
+   WPF's DropShadowEffect creates an additional render target (off-screen
+   bitmap) for each element that uses it. With 5 cards at 200% DPI
+   scaling, this was 20–30 MB extra. Replaced with a slightly offset
+   semi-transparent Border element — same visual result, zero extra
+   render targets.
+
+5. FROZEN BRUSHES
+   In XAML: <SolidColorBrush po:Freeze="True" Color="#FFFFFF"/>
+   A "Frozen" brush is immutable (cannot change after creation). WPF
+   can share frozen objects across multiple UI elements and skips
+   change-notification overhead. Minor savings per card but adds up.
+
+6. SHARED GIF PLAYER
+   Already explained in Part 7. One WriteableBitmap per GIF URI regardless
+   of how many cards are showing it.
+
+7. ArrayPool<byte>
+   The GIF player and WebSocket service rent byte arrays from ArrayPool
+   instead of allocating new arrays. Rented arrays are returned to the
+   pool and reused. This prevents the garbage collector from running
+   frequently and avoids memory fragmentation.
+
+RESULT: Nesti uses approximately 35–50 MB in normal operation with the
+bird GIF playing and occasional notification cards.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PART 11 — THE DUMMY MODE (NO SERVER NEEDED)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+When you are developing the UI or testing without a real server, set:
+  USE_REAL_WEBSOCKET=false
+
+This switches to DummyWebSocketService.cs. Instead of connecting to any
+server, it creates a DispatcherTimer that fires every DUMMY_INTERVAL_MS
+milliseconds and generates a fake notification from a rotating list of
+example messages. The interface (IWebSocketSource) is the same, so
+MainWindow.cs does not know or care whether it is using the real or
+dummy service.
+
+When dummy mode is active, all HTTP POST calls (mark-as-read, snooze) are
+automatically skipped as well. No network activity happens at all.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PART 12 — FILE-BY-FILE REFERENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+App.xaml / App.xaml.cs
+  The entry point. Sets software rendering. Declares the startup window.
+
+MainWindow.xaml
+  The transparent fullscreen overlay window.
+  Contains: bird image, hide/close hover buttons, notification panel.
+
+MainWindow.xaml.cs
+  The brain of the app. Orchestrates everything:
+  • Reads config → reads username → calls mEmpID API → connects WebSocket
+  • Receives notifications → deduplication → creates cards → manages timers
+  • Click-through WndProc hook
+  • Bird hover logic
+  • Hide/show logic
+
+Models/NotificationMessage.cs
+  A simple data class. Mirrors the JSON fields from the WebSocket server.
+  Each field has a [JsonPropertyName("...")] attribute so the JSON
+  "user_id" key maps to the C# property UserId.
+
+Helpers/AppConfig.cs
+  Reads .env into typed properties. The single source of truth for all
+  config values. If a key is missing, returns a safe default.
+
+Helpers/UserHelper.cs
+  Reads Environment.UserName. Also has an optional GetFullNameAsync()
+  to resolve a display name from an API (not wired into the main UI).
+
+Helpers/SharedGifPlayer.cs
+  Custom GIF compositor. Static cache. One WriteableBitmap per GIF.
+  Full frame compositing with disposal methods. See Part 7.
+
+Services/IWebSocketSource.cs
+  An interface — a contract that defines what a WebSocket service must do.
+  Both real and dummy services implement this interface, so the rest of
+  the app works the same regardless of which one is used.
+
+Services/WebSocketService.cs
+  The real WebSocket connection. Handles:
+  • mEmpID URL resolution
+  • 15-second connection timeout
+  • Heartbeat/ping-pong (25s interval, 7s timeout)
+  • Exponential back-off reconnection with jitter
+  • Message parsing and event raising
+
+Services/DummyWebSocketService.cs
+  Fake WebSocket for testing. Fires rotating fake notifications on a timer.
+  No network activity.
+
+Services/SoundService.cs
+  Plays bird_chirp.mp3 when a notification arrives. Uses MediaPlayer.
+  Respects SOUND_ENABLED config.
+
+Services/NotificationApiService.cs
+  Makes HTTP POST calls to the server.
+  • MarkAsReadAsync — called on dismiss (auto or manual)
+  • SnoozeAsync — called on snooze
+  Fire-and-forget. Single shared HttpClient.
+
+Controls/NotificationControl.xaml
+  The visual design of a single notification card:
+  • Shadow (offset Border, no DropShadowEffect)
+  • Avatar GIF on the left (points at SharedGifPlayer bitmap)
+  • Title text + body text
+  • Snooze button (inline SVG path, no PNG)
+  • Dismiss button (PNG image)
+
+Controls/NotificationControl.xaml.cs
+  The behaviour of the notification card:
+  • SetData() — fills in the card with content
+  • OnLoaded animation — slide in from right
+  • AnimateOut() — slide out to right
+  • Card_Click, Dismiss_MouseUp, Snooze_MouseUp event handlers
+  • CallMarkAsRead() — calls the API (or skips based on userId/-1 rule)
+
+assets/
+  nest_bird.gif      — bird mascot animation
+  jarvis.gif         — notification card avatar animation
+  bird_chirp.mp3     — notification sound
+  cross_button_notif_icon.png — dismiss button image
+
+.env
+  All runtime configuration. Edit this file and restart to change settings.
+  No recompile needed.
+
+Nesti.csproj
+  The project file. Lists all dependencies (DotNetEnv), which files are
+  compiled, which assets are copied to the output folder, target platform
+  (Windows), runtime (.NET 8).
+
+app.manifest
+  Tells Windows this app is DPI-aware (System V1). Prevents Windows from
+  blurry-scaling the window on high-DPI screens.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PART 13 — DATA FLOW DIAGRAM (TEXT)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+APP STARTUP:
+
+  App.xaml.cs
+      │  set SoftwareOnly rendering
+      ▼
+  MainWindow.Window_Loaded
+      │  read .env → AppConfig
+      │  read Windows username → "jdoe"
+      │  GET {API_BASE_URL}?CorpID=Corp\jdoe → mEmpID = "12345"
+      │  open WebSocket → wss://server.com/ws/12345
+      │  start heartbeat timer (every 25s)
+      │  start bird GIF animation
+      ▼
+  Waiting for messages...
+
+NOTIFICATION RECEIVED:
+
+  WebSocket receives JSON text frame
+      │
+      ▼
+  Parse JSON → NotificationMessage object
+      │
+      ├─ type == "pong"? → cancel pong timeout, done
+      │
+      ├─ instanceId already seen? → discard, done
+      │
+      ▼
+  Add to deduplication set
+  Create NotificationControl
+  SetData(instanceId, title, body, url, userId, mEmpId)
+  Add to notification panel
+  Start slide-in animation
+  Play bird_chirp.mp3
+  Start auto-dismiss timer (10 seconds)
+
+USER DISMISSES CARD:
+
+  Dismiss button clicked / Card clicked / Timer fires
+      │
+      ├─ Start slide-out animation
+      │
+      ├─ UseRealWebSocket=true AND userId != -1?
+      │     YES → POST MARK_AS_READ_URL (Automatic Read / Manual Read)
+      │     NO  → skip API call
+      │
+      ▼
+  Remove card from panel
+  Cleanup() — release image references
+
+USER SNOOZES CARD:
+
+  Snooze button clicked
+      │
+      ├─ Start slide-out animation
+      │
+      ├─ UseRealWebSocket=true AND userId != -1?
+      │     YES → POST MARS_SNOOZE_URL (snoozeDurationMinutes=5)
+      │     NO  → skip API call
+      │
+      ▼
+  Remove card from panel
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PART 14 — GLOSSARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Term                  Meaning
+─────────────────── ─────────────────────────────────────────────────
+WPF                   Windows Presentation Foundation — Microsoft's
+                      desktop UI framework for C#
+
+XAML                  XML-based markup language for describing WPF UI
+
+.NET 8                The runtime that executes C# programs
+
+UserControl           A reusable WPF component with its own XAML and
+                      code-behind (e.g. NotificationControl)
+
+WebSocket             Persistent two-way connection between app and server
+
+JSON                  JavaScript Object Notation — text format for data
+                      exchange  { "key": "value" }
+
+mEmpID                Employee ID fetched from the REST API at startup;
+                      used as the WebSocket channel and userSession
+
+userSession           The field name in API payloads that carries mEmpID
+
+instanceId            Unique ID for each notification (UUID). Used for
+                      deduplication and as instance_id in API calls
+
+Heartbeat             Periodic ping to check the connection is alive
+
+Exponential back-off  Reconnect wait time doubles each failed attempt
+
+Jitter                Random variation added to reconnect delay to
+                      prevent all clients retrying simultaneously
+
+WriteableBitmap       WPF bitmap that can be written to from code in real
+                      time; used for the shared GIF canvas
+
+ArrayPool<byte>       Object pool for byte arrays; avoids repeated heap
+                      allocations and reduces garbage collection
+
+Fire-and-forget       An async operation whose result is intentionally
+                      ignored; execution continues immediately
+
+HashSet               A collection with no duplicates; used for fast
+                      deduplication lookups (O(1) average)
+
+DispatcherTimer       WPF timer that fires on the UI thread; safe to
+                      update UI elements directly from its callback
+
+HwndSource / WndProc  Low-level Windows message handling; used to
+                      implement click-through on transparent areas
+
+WS_EX_LAYERED         Windows window style flag that enables per-pixel
+                      alpha transparency
+
+DropShadowEffect      WPF visual effect that creates a shadow by
+                      allocating an extra off-screen render target
+
+po:Freeze             XAML attribute that makes a Freezable (e.g. Brush)
+                      immutable, saving change-notification overhead
+
+DotNetEnv             Third-party NuGet package that parses .env files
+
+NuGet                 The package manager for .NET (like npm for Node.js)
+
+──────────────────────────────────────────────────────────────────────
+END OF GUIDE
+──────────────────────────────────────────────────────────────────────
