@@ -9,6 +9,9 @@
     <AssemblyName>Nesti</AssemblyName>
     <Version>1.0.0</Version>
     <Product>Nesti Bird Assistant</Product>
+    <!-- Custom manifest sets System DPI awareness (not PerMonitorV2) to prevent
+         per-monitor render target scaling on high-DPI GPU machines. -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>

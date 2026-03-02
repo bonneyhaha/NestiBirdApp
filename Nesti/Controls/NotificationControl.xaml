@@ -1,6 +1,7 @@
 <UserControl x:Class="Nesti.Controls.NotificationControl"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:po="http://schemas.microsoft.com/winfx/2006/xaml/presentation/options"
              Width="420"
              Margin="0,0,0,8">
 
@@ -13,107 +14,120 @@
         </TransformGroup>
     </UserControl.RenderTransform>
 
-    <Border x:Name="Card"
-            Background="White"
-            BorderBrush="#E5E7EB"
-            BorderThickness="1"
-            CornerRadius="12"
-            Padding="4"
-            Cursor="Hand"
-            MouseLeftButtonDown="Card_Click">
+    <!--
+        Shadow illusion via a stacked offset Border instead of DropShadowEffect.
 
-        <Border.Effect>
-            <DropShadowEffect Color="#000000"
-                              Opacity="0.10"
-                              BlurRadius="4"
-                              ShadowDepth="3"
-                              Direction="270" />
-        </Border.Effect>
+        DropShadowEffect allocates a full-size offscreen render target (same resolution
+        as the card) in WPF's composition layer, then runs a Gaussian blur shader pass.
+        On a high-DPI GPU machine with 5 simultaneous cards:
+            5 cards × ~420×80 px × 200% DPI² × 4 bpp × 2 RT passes ≈ 20–30 MB extra.
 
-        <Grid Margin="8">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="52" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
+        Replacing with a semi-transparent Border at a 2 px offset costs zero additional
+        render targets and is composited in the same software-render pass as the card.
+    -->
+    <Grid>
 
-            <!-- Bird avatar -->
-            <Border Grid.Column="0"
-                    Width="48" Height="48"
-                    CornerRadius="12"
-                    VerticalAlignment="Center">
-                <Border.Background>
-                    <SolidColorBrush Color="#3B82F6" />
-                </Border.Background>
-                <Image x:Name="AvatarImage"
-                       Width="32" Height="32"
-                       Stretch="Uniform" />
-            </Border>
+        <!-- Shadow layer — drawn BEHIND the card, offset down-right by 2 px -->
+        <Border CornerRadius="13"
+                Margin="2,3,0,0"
+                IsHitTestVisible="False">
+            <Border.Background>
+                <!-- Frozen: immutable after load, no per-instance allocation overhead -->
+                <SolidColorBrush po:Freeze="True" Color="#000000" Opacity="0.09" />
+            </Border.Background>
+        </Border>
 
-            <!--
-                Content column — single Grid cell shared by text and action buttons.
-                Text is vertically centered; buttons are overlaid at the top-right corner
-                using alignment only. Everything is one hit-test region, fixing the hover
-                and click detection issues caused by separate fixed-width button columns.
-                Buttons use Border (not Button) so MouseLeftButtonDown is owned directly:
-                  e.Handled=true  → stops event bubbling to Card_Click
-                  CaptureMouse()  → guarantees MouseLeftButtonUp fires on this element
-                                    even if the cursor moves between press and release
-            -->
-            <Grid Grid.Column="1" Margin="12,0,4,0">
+        <!-- Card — white background with a subtle border, no GPU Effect -->
+        <Border x:Name="Card"
+                BorderThickness="1"
+                CornerRadius="12"
+                Padding="4"
+                Cursor="Hand"
+                MouseLeftButtonDown="Card_Click">
+            <Border.Background>
+                <SolidColorBrush po:Freeze="True" Color="White" />
+            </Border.Background>
+            <Border.BorderBrush>
+                <SolidColorBrush po:Freeze="True" Color="#E5E7EB" />
+            </Border.BorderBrush>
 
-                <!-- Title + message -->
-                <StackPanel VerticalAlignment="Center">
-                    <TextBlock x:Name="TitleBlock"
-                               FontSize="16"
-                               FontWeight="SemiBold"
-                               Foreground="#1F2937"
-                               TextTrimming="CharacterEllipsis"
-                               Margin="0,0,56,0" />
-                    <TextBlock x:Name="MessageBlock"
-                               FontSize="12"
-                               FontWeight="Normal"
-                               Foreground="#6B7280"
-                               TextWrapping="Wrap"
-                               MaxHeight="36"
-                               Margin="0,2,56,0"
-                               TextTrimming="CharacterEllipsis" />
-                </StackPanel>
+            <Grid Margin="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="52" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
 
-                <!-- Action buttons — always visible, overlaid top-right -->
-                <StackPanel Orientation="Horizontal"
-                            HorizontalAlignment="Right"
-                            VerticalAlignment="Top">
+                <!-- Avatar -->
+                <Border Grid.Column="0"
+                        Width="48" Height="48"
+                        CornerRadius="12"
+                        VerticalAlignment="Center">
+                    <Border.Background>
+                        <!-- Frozen: one SolidColorBrush instance shared across all cards -->
+                        <SolidColorBrush po:Freeze="True" Color="#3B82F6" />
+                    </Border.Background>
+                    <Image x:Name="AvatarImage"
+                           Width="32" Height="32"
+                           Stretch="Uniform" />
+                </Border>
 
-                    <Border x:Name="SnoozeBtn"
-                            Width="24" Height="24"
-                            Background="Transparent"
-                            Cursor="Hand"
-                            ToolTip="Snooze"
-                            MouseLeftButtonDown="Snooze_MouseDown"
-                            MouseLeftButtonUp="Snooze_MouseUp">
-                        <Image Source="pack://application:,,,/assets/snooze_icon.png"
-                               Width="22" Height="22"
-                               Stretch="Uniform"
-                               RenderOptions.BitmapScalingMode="HighQuality" />
-                    </Border>
+                <Grid Grid.Column="1" Margin="12,0,4,0">
 
-                    <Border x:Name="DismissBtn"
-                            Width="24" Height="24"
-                            Background="Transparent"
-                            Cursor="Hand"
-                            Margin="4,0,0,0"
-                            ToolTip="Dismiss"
-                            MouseLeftButtonDown="Dismiss_MouseDown"
-                            MouseLeftButtonUp="Dismiss_MouseUp">
-                        <Image Source="pack://application:,,,/assets/cross_button_notif_icon.png"
-                               Width="22" Height="22"
-                               Stretch="Uniform"
-                               RenderOptions.BitmapScalingMode="HighQuality" />
-                    </Border>
+                    <!-- Title + message -->
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="TitleBlock"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Foreground="#1F2937"
+                                   TextTrimming="CharacterEllipsis"
+                                   Margin="0,0,56,0" />
+                        <TextBlock x:Name="MessageBlock"
+                                   FontSize="12"
+                                   FontWeight="Normal"
+                                   Foreground="#6B7280"
+                                   TextWrapping="Wrap"
+                                   MaxHeight="36"
+                                   Margin="0,2,56,0"
+                                   TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
 
-                </StackPanel>
+                    <!-- Action buttons -->
+                    <StackPanel Orientation="Horizontal"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Top">
+
+                        <Border x:Name="SnoozeBtn"
+                                Width="24" Height="24"
+                                Background="Transparent"
+                                Cursor="Hand"
+                                ToolTip="Snooze"
+                                MouseLeftButtonDown="Snooze_MouseDown"
+                                MouseLeftButtonUp="Snooze_MouseUp">
+                            <Image Source="pack://application:,,,/assets/snooze_icon.png"
+                                   Width="22" Height="22"
+                                   Stretch="Uniform"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                        </Border>
+
+                        <Border x:Name="DismissBtn"
+                                Width="24" Height="24"
+                                Background="Transparent"
+                                Cursor="Hand"
+                                Margin="4,0,0,0"
+                                ToolTip="Dismiss"
+                                MouseLeftButtonDown="Dismiss_MouseDown"
+                                MouseLeftButtonUp="Dismiss_MouseUp">
+                            <Image Source="pack://application:,,,/assets/cross_button_notif_icon.png"
+                                   Width="22" Height="22"
+                                   Stretch="Uniform"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                        </Border>
+
+                    </StackPanel>
+                </Grid>
+
             </Grid>
+        </Border>
 
-        </Grid>
-    </Border>
+    </Grid>
 </UserControl>

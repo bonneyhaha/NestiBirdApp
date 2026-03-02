@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+
+  <assemblyIdentity version="1.0.0.0" name="Nesti.app" />
+
+  <!-- Standard execution level — no elevation needed -->
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
+    <security>
+      <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
+  <!-- Windows 10 / 11 compatibility -->
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
+    </application>
+  </compatibility>
+
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+
+      <!--
+        DPI AWARENESS: System (V1 only — intentionally NOT PerMonitorV2)
+        ─────────────────────────────────────────────────────────────────
+        PerMonitorV2 (the .NET 8 WPF default) causes WPF to:
+          • Create a new render target for every DPI change (monitor move)
+          • Scale all layout passes with the per-monitor DPI factor
+          • Allocate DPI-scaled offscreen surfaces for effects and transitions
+
+        On a 4K monitor at 200% scaling, the effective render surface area is
+        (700 × 2)² = 4× larger than at 100%.  With PerMonitorV2, moving the
+        window between a 100% and 200% monitor allocates a second full-scale
+        render target while the transition is in progress — easily 30–50 MB.
+
+        "System" awareness lets WPF render at the PRIMARY monitor's DPI (typically
+        96 dpi / 100%) and lets DWM bitmap-stretch the result on high-DPI displays.
+        Render target size stays fixed; no secondary-monitor re-allocation occurs.
+
+        Trade-off: slight bitmap blurriness on secondary monitors with different DPI.
+        Acceptable for a notification overlay used primarily on the primary monitor.
+      -->
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true</dpiAware>
+
+      <!--
+        NOTE: The modern <dpiAwareness> element (SMI/2016/A11ySettings) that would
+        enable PerMonitorV2 is deliberately ABSENT from this manifest.
+        Including it would override the V1 setting above and re-enable per-monitor
+        scaling with all its associated render target allocations.
+      -->
+
+    </windowsSettings>
+  </application>
+
+</assembly>

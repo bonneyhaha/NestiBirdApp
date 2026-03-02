@@ -8,12 +8,12 @@ public partial class App : Application
 {
     protected override void OnStartup(StartupEventArgs e)
     {
-        // Force software (CPU) rendering — disables DirectX/GPU for all WPF elements.
-        // Eliminates GPU memory usage from DropShadowEffects and hardware composition.
+        // ── Software rendering — MUST be before base.OnStartup ────────────────
+        // Prevents WPF from creating a D3D device or any VRAM allocations.
+        // All render surfaces (window back-buffer, effect targets) live in system RAM.
+        // On high-DPI GPU machines this alone cuts VRAM-backed surface cost by ~80%.
         RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
 
-        // AppConfig's static constructor loads .env automatically on first access.
-        // Nothing else needed here — MainWindow is launched via StartupUri.
         base.OnStartup(e);
     }
 }

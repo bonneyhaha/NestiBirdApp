@@ -1,0 +1,353 @@
+═══════════════════════════════════════════════════════════════════════════════
+  NESTI  —  PROJECT SUMMARY
+  WPF Desktop Notification Overlay  |  .NET 8  |  POC-2
+═══════════════════════════════════════════════════════════════════════════════
+
+
+───────────────────────────────────────────────────────────────────────────────
+WHAT THIS PROJECT IS
+───────────────────────────────────────────────────────────────────────────────
+
+Nesti is a lightweight Windows desktop overlay that sits in the bottom-right
+corner of the screen. It shows an animated bird character (nest_bird.gif) and
+receives real-time push notifications from a backend server via WebSocket.
+
+When a notification arrives, a card slides in from the right with a title,
+body message, and action buttons (Snooze, Dismiss). Cards auto-dismiss after
+a configurable timeout, play a chirp sound, and can open a URL when clicked.
+
+The window is fully transparent and click-through — only the bird zone and
+live notification cards are interactive (implemented via WM_NCHITTEST).
+It does not appear in Alt+Tab or the taskbar (WS_EX_TOOLWINDOW flag).
+
+Configuration is done via a .env file placed next to the executable — no
+registry entries, no installer required.
+
+
+───────────────────────────────────────────────────────────────────────────────
+COMPLETE FILE STRUCTURE
+───────────────────────────────────────────────────────────────────────────────
+
+Nesti/
+│
+├── App.xaml / App.xaml.cs
+│     Entry point. Forces software-only rendering (SoftwareOnly) to
+│     eliminate GPU memory allocations from DropShadowEffects.
+│
+├── MainWindow.xaml / MainWindow.xaml.cs
+│     The single transparent, always-on-top, borderless window.
+│     Owns: the bird image, notification stack panel, hide/close buttons.
+│     Responsibilities:
+│       • Position itself at bottom-right of the working area
+│       • Install WM_NCHITTEST hook (WndProc) for selective click-through
+│       • Subscribe to IWebSocketSource events
+│       • Add/remove NotificationControl instances and their auto-dismiss timers
+│       • Deduplicate incoming notifications (HashSet + Queue, capped at 500)
+│       • Evict oldest card when MaxNotifications limit is reached
+│       • Restore bird visibility on new notification after Hide
+│
+├── Controls/
+│   ├── NotificationControl.xaml
+│   │     Visual layout of a single notification card:
+│   │       - 420px wide card with white background, drop-shadow, rounded corners
+│   │       - Left column: 48×48 animated avatar (AvatarImage)
+│   │       - Right column: Title (SemiBold 16pt) + Message (12pt, 2-line max)
+│   │       - Overlaid buttons top-right: Snooze (clock icon) + Dismiss (×)
+│   │
+│   └── NotificationControl.xaml.cs
+│         Code-behind for the card:
+│           • On load: slide-in from right + scale-up + fade-in animations
+│           • AnimateOut(): slide-out + scale-down + fade-out, then calls Cleanup()
+│           • Cleanup(): nulls AvatarImage.Source and text (releases references)
+│           • Card click → opens URL + marks as read (fire-and-forget)
+│           • Snooze/Dismiss buttons → raise events to MainWindow
+│           • Avatar animation: set Source = SharedGifPlayer.SharedBitmap once
+│
+├── Helpers/
+│   ├── AppConfig.cs
+│   │     Static class. Loads .env from BaseDirectory via DotNetEnv on first access.
+│   │     Exposes typed properties for every configurable value:
+│   │       WS_URL, WS_RECONNECT_BASE_MS, WS_RECONNECT_MAX_ATTEMPTS,
+│   │       API_BASE_URL, API_GET_WS_URL_PATH, API_GET_FULLNAME_PATH,
+│   │       BIRD_DEFAULT_URL, NOTIFICATION_DURATION_MS, MAX_NOTIFICATIONS,
+│   │       SOUND_ENABLED, USE_REAL_WEBSOCKET, DUMMY_INTERVAL_MS,
+│   │       MARS_SNOOZE_URL, MARK_AS_READ_URL
+│   │
+│   ├── SharedGifPlayer.cs
+│   │     Custom GIF animation engine (replaces WpfAnimatedGif library).
+│   │     Key design:
+│   │       • One instance per GIF URI, cached statically for app lifetime.
+│   │       • BitmapCacheOption.None → decoder never pre-caches all frames;
+│   │         each frame is decoded on demand from a MemoryStream.
+│   │       • _canvas byte[] maintains the persistent composited BGRA canvas.
+│   │       • Proper GIF compositing: frame offsets, binary transparency,
+│   │         disposal methods 0/1 (leave), 2 (clear), 3 (restore previous).
+│   │       • ArrayPool<byte> for per-tick frame decode buffer — no GC pressure.
+│   │       • SharedBitmap (WriteableBitmap): ALL Image controls share one surface.
+│   │         WriteableBitmap auto-notifies WPF on WritePixels — zero per-card events.
+│   │       • One DispatcherTimer drives animation for ALL subscribers simultaneously.
+│   │
+│   └── UserHelper.cs
+│         Static utility. Reads Windows username (Environment.UserName).
+│         Can call the API to resolve a display full name.
+│         Provides GetFirstName() and GetGreeting() helpers.
+│
+├── Models/
+│   └── NotificationMessage.cs
+│         Plain data class. Deserialised from WebSocket JSON payload.
+│         Fields: Id, InstanceId, Title, Message, Description, Url,
+│                 Type, NotificationType, UserId, Timestamp.
+│         Computed: DedupeKey (InstanceId ?? Id ?? title+msg+time)
+│                   Body (Message ?? Description ?? empty)
+│
+├── Services/
+│   ├── IWebSocketSource.cs
+│   │     Interface. Decouples MainWindow from both real and dummy services.
+│   │     Events: NotificationReceived, StatusChanged.
+│   │     Method: ConnectAsync(url).
+│   │
+│   ├── WebSocketService.cs
+│   │     Real WebSocket client (System.Net.WebSockets.ClientWebSocket).
+│   │     Features:
+│   │       • ResolveUrlAsync(): calls REST API for dynamic WS URL, or falls
+│   │         back to WS_URL from .env.
+│   │       • Automatic exponential-backoff reconnection (base × 2^attempt,
+│   │         capped at 60 s, up to WS_RECONNECT_MAX_ATTEMPTS retries).
+│   │       • 8 KB receive buffer rented from ArrayPool — not reallocated per
+│   │         message or per reconnect.
+│   │       • Raises NotificationReceived on thread-pool; MainWindow marshals
+│   │         to UI thread via Dispatcher.Invoke.
+│   │
+│   ├── DummyWebSocketService.cs
+│   │     Test/dev mode service (USE_REAL_WEBSOCKET=false in .env).
+│   │     Uses a DispatcherTimer to fire 7 rotating sample notifications at a
+│   │     configurable interval (DUMMY_INTERVAL_MS, default 5 000 ms).
+│   │     Each firing gets a unique ID so deduplication never suppresses it.
+│   │
+│   ├── NotificationApiService.cs
+│   │     Static HTTP client for notification actions:
+│   │       • SnoozeAsync()     → POST to MARS_SNOOZE_URL
+│   │       • MarkAsReadAsync() → POST to MARK_AS_READ_URL
+│   │                           + writes ID to %AppData%\Nesti\dismissed.json
+│   │       • IsDismissed()     → in-memory HashSet lookup (loaded from disk once)
+│   │     Uses a single static HttpClient (correct pattern — avoids socket exhaustion).
+│   │
+│   └── SoundService.cs
+│         Wraps WPF's MediaPlayer for MP3 playback.
+│         Tears down the COM WMF graph immediately on MediaEnded (not on GC).
+│         Disposed in Window_Closing.
+│
+├── assets/
+│   ├── nest_bird.gif           Animated bird (150×150, packed as WPF Resource)
+│   ├── jarvis.gif              Notification avatar (32×32, packed as WPF Resource)
+│   ├── snooze_icon.png         Snooze button icon (22×22, packed as WPF Resource)
+│   ├── cross_button_notif_icon.png  Dismiss button icon (22×22, packed as Resource)
+│   └── bird_chirp.mp3          Notification sound (copied to output dir)
+│
+├── .env                        Runtime configuration (copied to output dir)
+├── explanation.txt             Why WPF uses >15 MB baseline (framework overhead)
+├── summary.txt                 This file
+└── Nesti.csproj
+      Target: net8.0-windows, WinExe, UseWPF=true
+      Only external dependency: DotNetEnv 3.1.1
+
+
+───────────────────────────────────────────────────────────────────────────────
+ARCHITECTURE OVERVIEW
+───────────────────────────────────────────────────────────────────────────────
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │  .env  ──►  AppConfig (static, loaded once)                    │
+  └──────────────────────┬──────────────────────────────────────────┘
+                         │
+  ┌──────────────────────▼──────────────────────────────────────────┐
+  │  MainWindow                                                     │
+  │    │                                                            │
+  │    ├─► IWebSocketSource ──┬─► WebSocketService   (real WS)     │
+  │    │                      └─► DummyWebSocketService (dev timer) │
+  │    │                                                            │
+  │    ├─► SoundService (MediaPlayer MP3)                          │
+  │    │                                                            │
+  │    ├─► NotificationsPanel (StackPanel)                         │
+  │    │      └─► [0..N] NotificationControl                       │
+  │    │               └─► AvatarImage.Source                      │
+  │    │                       └─► SharedGifPlayer("jarvis.gif")   │
+  │    │                             └─► SharedBitmap (shared)     │
+  │    │                                                            │
+  │    └─► BirdImage.Source                                        │
+  │              └─► SharedGifPlayer("nest_bird.gif")              │
+  │                    └─► SharedBitmap (shared)                   │
+  └─────────────────────────────────────────────────────────────────┘
+
+  WebSocket message flow:
+    Server → ClientWebSocket → ListenAsync → ParseAndRaise
+    → NotificationReceived event (thread pool)
+    → Dispatcher.Invoke → OnNotificationReceived (UI thread)
+    → TryAddSeen (dedupe) → AddNotification → NotificationControl
+    → DispatcherTimer (auto-dismiss) + DismissRequested event
+
+
+───────────────────────────────────────────────────────────────────────────────
+ALL AREAS OF RAM CONSUMPTION
+───────────────────────────────────────────────────────────────────────────────
+
+Listed from LARGEST to SMALLEST contributor.
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 1. WPF + .NET 8 RUNTIME BASELINE                            ~40–65 MB      │
+│    Unavoidable. Loaded the moment any WPF window opens.                    │
+│                                                                             │
+│    • .NET 8 CLR (JIT, GC, thread pool, System.* assemblies)  ~20–30 MB    │
+│    • WPF rendering stack (PresentationCore, PresentationFramework)~15–20 MB│
+│    • DirectX/D3D + software rendering fallback                ~5–10 MB     │
+│    • WPF default theme resources (brushes, templates)          ~2–5 MB     │
+│                                                                             │
+│    Cannot be reduced. This is the floor for any WPF application.           │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 2. SharedGifPlayer — nest_bird.gif                          ~0.5–5 MB      │
+│                                                                             │
+│    • MemoryStream: compressed GIF bytes             (depends on GIF size)  │
+│    • _canvas byte[]: canvasW × canvasH × 4 BGRA     (e.g. 90 KB @ 150×150)│
+│    • SharedBitmap WriteableBitmap: same pixel count  (90 KB @ 150×150)     │
+│    • _infos[]: int[] of frame metadata               (<5 KB for 60 frames) │
+│    • _savedCanvas: only when disposal=3 used         (same as _canvas)     │
+│    • Per-tick ArrayPool buffer: rented + returned, never accumulates        │
+│                                                                             │
+│    FIXED cost — does not grow with number of notifications.                │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 3. SharedGifPlayer — jarvis.gif                             ~0.05–0.5 MB   │
+│                                                                             │
+│    Same structure as above. Much smaller because jarvis.gif is 32×32 px.   │
+│    • _canvas: 32 × 32 × 4 = 4 KB                                           │
+│    • SharedBitmap: 4 KB                                                     │
+│    • MemoryStream: size of the compressed GIF (~20–100 KB typically)        │
+│                                                                             │
+│    FIXED cost — all N notification cards share the same 4 objects.         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 4. ACTIVE NOTIFICATION CARDS (NotificationControl × N)      ~0.5–2 MB     │
+│                                                                             │
+│    Per live card on screen (max = MAX_NOTIFICATIONS, default 5):           │
+│    • UserControl visual tree (Border, Grid, TextBlock × 2, Image × 3)     │
+│    • WPF layout / measure / arrange data structures                        │
+│    • DropShadowEffect (CPU-rendered since SoftwareOnly mode)               │
+│    • Animation objects (DoubleAnimation × 4 on entry, × 4 on exit)        │
+│    • String allocations for Title and Message text                         │
+│                                                                             │
+│    The AvatarImage.Source is SharedBitmap — zero per-card GIF cost.        │
+│    Cards are removed from the panel + Cleanup() called on dismiss.         │
+│    WPF GC collects the visual objects after removal.                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 5. WEBSOCKET RECEIVE BUFFER                                 ~8 KB          │
+│                                                                             │
+│    One 8 KB buffer rented from ArrayPool<byte>.Shared.                     │
+│    Reused across all messages and reconnect cycles — never reallocated.    │
+│    Returned to pool even on exception (finally block).                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 6. DEDUPLICATE SEEN-IDS CACHE                               ~0.1–0.5 MB   │
+│                                                                             │
+│    _seenIds HashSet<string>: capped at MaxSeenIds = 500 entries.           │
+│    _seenIdsOrder Queue<string>: parallel insertion-order shadow.           │
+│    Oldest entries evicted when the cap is reached — bounded growth.        │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 7. NOTIFICATION API SERVICE                                 ~0.1 MB        │
+│                                                                             │
+│    • HttpClient (static, one instance for app lifetime)                    │
+│    • _dismissedCache HashSet<string>: dismissed notification IDs loaded    │
+│      from %AppData%\Nesti\dismissed.json once at first access.             │
+│      Grows unbounded but only with actually dismissed IDs.                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 8. SOUND SERVICE (MediaPlayer)                              ~2–5 MB active │
+│                                                                             │
+│    Idle: ~0 (no player allocated until Play() is called)                   │
+│    Playing: MediaPlayer opens a WMF COM graph for the MP3 (~2–5 MB native) │
+│    After playback: COM graph torn down immediately in OnMediaEnded.        │
+│    On window close: Dispose() releases the player.                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 9. APPCONFIG / DOTNETENV                                    ~0.05 MB       │
+│                                                                             │
+│    .env parsed once at first AppConfig property access.                    │
+│    Key-value strings stored in environment variables (process-wide).       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+───────────────────────────────────────────────────────────────────────────────
+RAM SUMMARY TABLE
+───────────────────────────────────────────────────────────────────────────────
+
+  Component                           Size            Grows?
+  ─────────────────────────────────── ─────────────── ──────────────────────
+  WPF + .NET 8 runtime baseline       40 – 65 MB      No (one-time load)
+  SharedGifPlayer: nest_bird.gif      0.5 – 5 MB      No (fixed per GIF)
+  SharedGifPlayer: jarvis.gif         0.05 – 0.5 MB   No (fixed per GIF)
+  Active notification cards (×5 max)  0.5 – 2 MB      Bounded (max 5 cards)
+  WebSocket receive buffer            8 KB            No (pooled)
+  Dedup seen-IDs cache                0.1 – 0.5 MB    Bounded (cap 500)
+  Notification API dismissed cache    grows slowly     Grows with dismissals
+  Sound service (when playing)        2 – 5 MB        No (torn down on end)
+  AppConfig / .env strings            <0.1 MB         No
+
+  TOTAL STEADY-STATE (approx):        ~45 – 75 MB
+
+The only component that grows over time is the dismissed-IDs cache
+(%AppData%\Nesti\dismissed.json), but each entry is a short string and the
+growth rate is one entry per user dismiss action — negligible in practice.
+
+
+───────────────────────────────────────────────────────────────────────────────
+WHAT WAS FIXED (GIF MEMORY LEAK HISTORY)
+───────────────────────────────────────────────────────────────────────────────
+
+  BEFORE (WpfAnimatedGif library):
+    Each NotificationControl called ImageBehavior.SetAnimatedSource() which
+    created a brand-new GIF decoder and decoded ALL frames into RAM.
+
+    With 5 cards and a 60-frame GIF at 150×150 BGRA32:
+      5 cards × 60 frames × 150 × 150 × 4 bytes = ~27 MB just for GIFs.
+    This grew every time new notifications arrived and old ones weren't yet GC'd.
+
+  AFTER (SharedGifPlayer):
+    • One decoder per GIF file (BitmapCacheOption.None — no frame cache).
+    • One _canvas buffer (one frame worth of pixels).
+    • One WriteableBitmap shared by all cards.
+    • Memory is ~0.1 MB for jarvis.gif regardless of how many cards are shown.
+    • WriteableBitmap updates all Image controls automatically — no event wiring.
+
+  RESULT: GIF memory is now fixed and does not grow with notification volume.
+
+
+───────────────────────────────────────────────────────────────────────────────
+CONFIGURATION REFERENCE (.env)
+───────────────────────────────────────────────────────────────────────────────
+
+  Key                         Default              Description
+  ─────────────────────────── ──────────────────── ───────────────────────────
+  WS_URL                      wss://localhost:8080/ws   WebSocket endpoint
+  WS_RECONNECT_BASE_MS        2000                 Reconnect delay base (ms)
+  WS_RECONNECT_MAX_ATTEMPTS   10                   Max retries before "failed"
+  API_BASE_URL                (empty)              REST API base URL
+  API_GET_WS_URL_PATH         (empty)              Path to resolve WS URL
+  API_GET_FULLNAME_PATH       (empty)              Path to resolve full name
+  BIRD_DEFAULT_URL            (empty)              URL opened on bird click
+  NOTIFICATION_DURATION_MS    10000                Auto-dismiss timeout
+  MAX_NOTIFICATIONS           5                    Max simultaneous cards
+  SOUND_ENABLED               true                 Play chirp on notification
+  USE_REAL_WEBSOCKET          true                 false = dummy test mode
+  DUMMY_INTERVAL_MS           5000                 Dummy mode fire interval
+  MARS_SNOOZE_URL             (empty)              POST endpoint for snooze
+  MARK_AS_READ_URL            (empty)              POST endpoint for dismiss

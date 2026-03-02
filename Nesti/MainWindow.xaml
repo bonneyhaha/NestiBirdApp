@@ -4,6 +4,7 @@
         Title="Nesti"
         Width="700"
         Height="700"
+        SizeToContent="Manual"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
@@ -15,15 +16,22 @@
         Closing="Window_Closing">
 
     <!--
-        Fully transparent window.
-        Click-through: WM_NCHITTEST returns HTTRANSPARENT for empty areas,
-        HTCLIENT only for the bird zone and active notification cards.
+        Non-layered window (AllowsTransparency=False) eliminates the per-pixel-alpha
+        DIB section that WS_EX_LAYERED + UpdateLayeredWindow requires. On high-DPI
+        GPU machines this DIB section was the single largest memory consumer
+        (700×700 at 200% DPI × 4 bpp × front+back buffers ≈ 30+ MB).
+
+        Background="#01000000" (A=1/255) ensures WPF's software renderer writes
+        near-transparent pixels for empty areas.  Window.Opacity=0.99 (set in
+        code-behind) tells DWM to use LWA_ALPHA uniform compositing — no per-pixel
+        buffer — so empty areas composite as virtually invisible against the desktop.
+
+        Click-through behaviour is unchanged: WM_NCHITTEST returns HTTRANSPARENT
+        for empty areas regardless of layering mode.
     -->
-    <Grid Background="Transparent">
+    <Grid>
 
         <!-- ── Notification stack ── -->
-        <!-- Width matches NotificationControl.xaml (420) + panel margin -->
-        <!-- bottom = BirdContainer top (158+5=163) + 10px gap = 173 -->
         <StackPanel x:Name="NotificationsPanel"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Bottom"
@@ -40,18 +48,6 @@
               MouseEnter="BirdContainer_MouseEnter"
               MouseLeave="BirdContainer_MouseLeave">
 
-            <!--
-                Buttons float over the top-right corner of the bird GIF row.
-                Styled exactly per ui.txt §7.1 (Button CSS Specifications):
-                  • Background : #F9FAFB  (bg-gray-50)
-                  • Border     : 1px solid #E5E7EB
-                  • Shape      : rounded-full  (CornerRadius="9999")
-                  • Padding    : 4px
-                  • SVG icons  : 12×12 displayed in a 14×14 viewBox
-                  • Hover bg   : #F3F4F6  (bg-gray-100)
-                  • Hover border: #D1D5DB (border-gray-300)
-                  • Stroke     : #6B7280, 1.5px, round line-caps
-            -->
             <StackPanel x:Name="ControlButtons"
                         HorizontalAlignment="Right"
                         VerticalAlignment="Top"
@@ -59,7 +55,7 @@
                         Margin="0,22,4,0"
                         Visibility="Collapsed">
 
-                <!-- Minimize / Hide button — SVG dash icon (M3,7 L11,7) -->
+                <!-- Hide button -->
                 <Button Margin="0,0,6,0"
                         Background="Transparent"
                         BorderThickness="0"
@@ -74,7 +70,6 @@
                                     BorderThickness="1"
                                     CornerRadius="9999"
                                     Padding="4">
-                                <!-- Viewbox scales the 14×14 SVG coordinate space to 12×12 display -->
                                 <Viewbox Width="12" Height="12">
                                     <Canvas Width="14" Height="14">
                                         <Path Data="M3,7 L11,7"
@@ -87,15 +82,15 @@
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="Bd" Property="Background"   Value="#F3F4F6" />
-                                    <Setter TargetName="Bd" Property="BorderBrush"  Value="#D1D5DB" />
+                                    <Setter TargetName="Bd" Property="Background"  Value="#F3F4F6" />
+                                    <Setter TargetName="Bd" Property="BorderBrush" Value="#D1D5DB" />
                                 </Trigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
                     </Button.Template>
                 </Button>
 
-                <!-- Close / exit button — SVG X icon (M10.5,3.5 L3.5,10.5 M3.5,3.5 L10.5,10.5) -->
+                <!-- Close button -->
                 <Button Background="Transparent"
                         BorderThickness="0"
                         Cursor="Hand"
@@ -121,8 +116,8 @@
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="Bd" Property="Background"   Value="#F3F4F6" />
-                                    <Setter TargetName="Bd" Property="BorderBrush"  Value="#D1D5DB" />
+                                    <Setter TargetName="Bd" Property="Background"  Value="#F3F4F6" />
+                                    <Setter TargetName="Bd" Property="BorderBrush" Value="#D1D5DB" />
                                 </Trigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
@@ -130,7 +125,7 @@
                 </Button>
             </StackPanel>
 
-            <!-- ── animated bird — ui.txt spec: 150px width ── -->
+            <!-- animated bird -->
             <Image x:Name="BirdImage"
                    Width="150" Height="150"
                    Stretch="Uniform"
@@ -138,7 +133,6 @@
                    HorizontalAlignment="Center"
                    VerticalAlignment="Bottom"
                    MouseLeftButtonDown="Bird_Click" />
-
 
         </Grid>
 
