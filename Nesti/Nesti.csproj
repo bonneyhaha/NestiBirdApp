@@ -25,7 +25,6 @@
     <Resource Include="assets\jarvis.gif" />
 
     <!-- PNG icons embedded as WPF resources -->
-    <Resource Include="assets\snooze_icon.png" />
     <Resource Include="assets\cross_button_notif_icon.png" />
 
     <!-- MP3 copied next to the exe so MediaPlayer can open it by path -->
