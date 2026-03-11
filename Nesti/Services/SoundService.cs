@@ -24,9 +24,9 @@ public sealed class SoundService : IDisposable
         {
             if (!File.Exists(_soundPath)) return;
 
-            // Tear down the previous player before creating a new one so the
-            // old WMF COM graph is released immediately (not on the next GC).
-            DisposePlayer();
+            // If a sound is already playing, skip rather than creating another
+            // WMF COM graph.  Avoids 100 MediaPlayer allocations in burst scenarios.
+            if (_player is not null) return;
 
             _player = new MediaPlayer();
             _player.MediaEnded += OnMediaEnded;   // auto-close when playback finishes

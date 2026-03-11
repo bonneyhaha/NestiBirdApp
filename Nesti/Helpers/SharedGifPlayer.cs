@@ -129,6 +129,15 @@ public sealed class SharedGifPlayer
     }
 
     /// <summary>
+    /// Suspends animation (e.g. when the hosting Image is not visible).
+    /// No pixels are written to the WriteableBitmap while paused.
+    /// </summary>
+    public void Pause()  => _timer.Stop();
+
+    /// <summary>Resumes animation after a Pause().</summary>
+    public void Resume() { if (_frameCount > 1) _timer.Start(); }
+
+    /// <summary>
     /// Stops the animation timer and releases resources for this player instance.
     /// </summary>
     public void Dispose()

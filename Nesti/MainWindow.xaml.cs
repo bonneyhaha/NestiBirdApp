@@ -203,8 +203,11 @@ public partial class MainWindow : Window
     private void HideButton_Click(object sender, RoutedEventArgs e)
     {
         _birdHidden = true;
-        BirdContainer.Visibility     = Visibility.Collapsed;
+        BirdContainer.Visibility      = Visibility.Collapsed;
         NotificationsPanel.Visibility = Visibility.Collapsed;
+        // Stop the GIF timer while the bird is invisible — saves CPU and
+        // avoids redundant WriteableBitmap updates every ~100 ms.
+        SharedGifPlayer.Get("pack://application:,,,/assets/nest_bird.gif").Pause();
     }
 
     private void CloseButton_Click(object sender, RoutedEventArgs e) =>
@@ -265,13 +268,22 @@ public partial class MainWindow : Window
                 _birdHidden = false;
                 BirdContainer.Visibility      = Visibility.Visible;
                 NotificationsPanel.Visibility = Visibility.Visible;
+                SharedGifPlayer.Get("pack://application:,,,/assets/nest_bird.gif").Resume();
             }
 
-            // Stack full → queue for later; slot opens when any card is dismissed
+            // Stack full → queue for later; slot opens when any card is dismissed.
+            // Cap at 50 to prevent unbounded memory growth during server bursts.
             if (_active.Count >= AppConfig.MaxNotifications)
             {
-                _overflow.Enqueue(msg);
-                System.Diagnostics.Debug.WriteLine($"[Nesti] Queued (overflow={_overflow.Count}): {msg.Title}");
+                if (_overflow.Count < 50)
+                {
+                    _overflow.Enqueue(msg);
+                    System.Diagnostics.Debug.WriteLine($"[Nesti] Queued (overflow={_overflow.Count}): {msg.Title}");
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"[Nesti] Overflow full (50), dropping: {msg.Title}");
+                }
                 return;
             }
 
@@ -360,8 +372,9 @@ public partial class MainWindow : Window
             ReleaseCard(ctrl);
             NotificationsPanel.Children.Remove(ctrl);
 
-            // Force layout so new positions are computed before we read them
-            NotificationsPanel.UpdateLayout();
+            // AdjustWindowHeight calls UpdateLayout — reuse that single pass
+            // to compute new screen positions for the reposition animation.
+            AdjustWindowHeight();
 
             foreach (var (card, oldY) in toReposition)
             {
@@ -376,7 +389,6 @@ public partial class MainWindow : Window
             }
 
             DequeueNext();
-            AdjustWindowHeight();
         }
 
         if (animate)

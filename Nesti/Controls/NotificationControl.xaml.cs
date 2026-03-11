@@ -53,17 +53,19 @@ public partial class NotificationControl : UserControl
     /// </summary>
     public void AnimateIn()
     {
-        var dur  = new Duration(TimeSpan.FromMilliseconds(1000));
-        var ease = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.4 };
+        // 400 ms is snappy enough to feel smooth while releasing animation
+        // clock objects twice as fast as the previous 1000 ms duration.
+        var dur  = new Duration(TimeSpan.FromMilliseconds(400));
+        var ease = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.3 };
 
         SlideTransform.BeginAnimation(TranslateTransform.XProperty,
-            new DoubleAnimation(400, 0, dur) { EasingFunction = ease });
+            new DoubleAnimation(350, 0, dur) { EasingFunction = ease });
         CardScale.BeginAnimation(ScaleTransform.ScaleXProperty,
-            new DoubleAnimation(0.9, 1, dur) { EasingFunction = ease });
+            new DoubleAnimation(0.92, 1, dur) { EasingFunction = ease });
         CardScale.BeginAnimation(ScaleTransform.ScaleYProperty,
-            new DoubleAnimation(0.9, 1, dur) { EasingFunction = ease });
+            new DoubleAnimation(0.92, 1, dur) { EasingFunction = ease });
         BeginAnimation(OpacityProperty,
-            new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(400))));
+            new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(250))));
     }
 
     /// <summary>
