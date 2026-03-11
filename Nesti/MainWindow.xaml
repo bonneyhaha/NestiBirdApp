@@ -8,6 +8,7 @@
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
+        UseLayoutRounding="True"
         ShowInTaskbar="False"
         Topmost="True"
         ResizeMode="NoResize"

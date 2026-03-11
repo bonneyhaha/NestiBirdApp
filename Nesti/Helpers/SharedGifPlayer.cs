@@ -202,17 +202,23 @@ public sealed class SharedGifPlayer
 
         // Decode current frame's pixels (on demand — not cached by the decoder).
         var frame = _decoder.Frames[i];
-        var src   = frame.Format == PixelFormats.Bgra32
-            ? (BitmapSource)frame
-            : new FormatConvertedBitmap(frame, PixelFormats.Bgra32, null, 0);
+        bool needsConvert = frame.Format != PixelFormats.Bgra32;
+        var src   = needsConvert
+            ? new FormatConvertedBitmap(frame, PixelFormats.Bgra32, null, 0)
+            : (BitmapSource)frame;
 
         int fw = Math.Min(fi.W, _canvasW - fi.Left);
         int fh = Math.Min(fi.H, _canvasH - fi.Top);
         if (fw <= 0 || fh <= 0) return;
 
         // Borrow a temporary pixel buffer from the pool (avoid GC each tick).
-        int   frameStride = fw * 4;
-        byte[] buf        = ArrayPool<byte>.Shared.Rent(fh * frameStride);
+        int   frameStride  = fw * 4;
+        int   nativeBytes  = needsConvert ? fh * frameStride : 0;
+        byte[] buf         = ArrayPool<byte>.Shared.Rent(fh * frameStride);
+
+        // Tell GC the true size of the WIC COM object backing the conversion so
+        // it collects promptly and doesn't let native memory accumulate across ticks.
+        if (nativeBytes > 0) GC.AddMemoryPressure(nativeBytes);
         try
         {
             src.CopyPixels(new Int32Rect(0, 0, fw, fh), buf, frameStride, 0);
@@ -221,6 +227,7 @@ public sealed class SharedGifPlayer
         finally
         {
             ArrayPool<byte>.Shared.Return(buf);
+            if (nativeBytes > 0) GC.RemoveMemoryPressure(nativeBytes);
         }
 
         // Push the updated canvas to the shared display surface.

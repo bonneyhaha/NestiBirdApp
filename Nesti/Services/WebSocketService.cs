@@ -10,6 +10,7 @@ namespace Nesti.Services;
 
 /// <summary>
 /// Manages a persistent WebSocket connection with automatic exponential-backoff reconnection.
+/// Reconnection never gives up — after the max-attempt cap it retries every 60 s indefinitely.
 /// All events are raised on the thread-pool; marshal to the UI thread as needed.
 /// </summary>
 public sealed class WebSocketService : IWebSocketSource
@@ -17,18 +18,32 @@ public sealed class WebSocketService : IWebSocketSource
     // ── Events ────────────────────────────────────────────────────────────────
     public event EventHandler<NotificationMessage>? NotificationReceived;
 
-    /// <summary>Fired with one of: "connecting", "connected", "reconnecting", "failed".</summary>
+    /// <summary>Fired with one of: "connecting", "connected", "reconnecting".</summary>
     public event EventHandler<string>? StatusChanged;
 
+    // ── Static ping payload — allocated once, reused every heartbeat tick ────
+    // Eliminates JsonSerializer + Encoding.UTF8.GetBytes allocation every 25 s.
+    private static readonly byte[] PingPayload =
+        Encoding.UTF8.GetBytes("{\"type\":\"ping\"}");
+
     // ── State ─────────────────────────────────────────────────────────────────
-    private ClientWebSocket?           _ws;
-    private CancellationTokenSource    _cts  = new();
-    private string                     _url  = string.Empty;
-    private int                        _attempt;
+    private ClientWebSocket?         _ws;
+    private CancellationTokenSource  _cts     = new();
+    private string                   _url     = string.Empty;
+    private int                      _attempt;
 
     // ── Heartbeat ─────────────────────────────────────────────────────────────
-    private Timer?                     _heartbeatTimer;
-    private CancellationTokenSource?   _pongCts;
+    private Timer?          _heartbeatTimer;
+
+    /// <summary>
+    /// Set to true when a pong is received.  Checked by WatchForPongAsync after
+    /// the timeout delay to decide whether to abort the socket.
+    /// Using volatile avoids a separate CancellationTokenSource per heartbeat
+    /// and eliminates the race where a fast pong (2-20 ms) cancels the token
+    /// before Register() is called, which would fire the abort callback
+    /// synchronously even though the pong arrived in time.
+    /// </summary>
+    private volatile bool _pongReceived;
 
     // ── Shutdown guard ────────────────────────────────────────────────────────
     private bool _isShuttingDown;
@@ -71,9 +86,9 @@ public sealed class WebSocketService : IWebSocketSource
                 if (doc.RootElement.TryGetProperty("mEmpID", out var prop))
                 {
                     long mEmpId = 0;
-                    if (prop.ValueKind == System.Text.Json.JsonValueKind.Number)
+                    if (prop.ValueKind == JsonValueKind.Number)
                         prop.TryGetInt64(out mEmpId);
-                    else if (prop.ValueKind == System.Text.Json.JsonValueKind.String)
+                    else if (prop.ValueKind == JsonValueKind.String)
                         long.TryParse(prop.GetString(), out mEmpId);
 
                     if (mEmpId != 0)
@@ -114,7 +129,7 @@ public sealed class WebSocketService : IWebSocketSource
     {
         StopHeartbeat();
 
-        // Cancel any previous listen loop
+        // Cancel any previous listen loop and create fresh socket
         _cts.Cancel();
         _cts = new CancellationTokenSource();
         _ws?.Dispose();
@@ -137,8 +152,9 @@ public sealed class WebSocketService : IWebSocketSource
             StartHeartbeat();
             _ = ListenAsync(_cts.Token);   // fire-and-forget
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            System.Diagnostics.Debug.WriteLine($"[Nesti WS] Connect failed: {ex.Message}");
             await ScheduleReconnectAsync();
         }
     }
@@ -148,8 +164,8 @@ public sealed class WebSocketService : IWebSocketSource
         // Rent from the shared pool so repeated reconnects don't allocate a new
         // 8 KB array each time — the same buffer is reused across reconnect cycles.
         const int BufSize = 8_192;
-        var buffer = ArrayPool<byte>.Shared.Rent(BufSize);
-        var sb     = new StringBuilder();
+        var buffer    = ArrayPool<byte>.Shared.Rent(BufSize);
+        var sb        = new StringBuilder();
         bool reconnect = false;
 
         try
@@ -165,6 +181,7 @@ public sealed class WebSocketService : IWebSocketSource
 
                     if (result.MessageType == WebSocketMessageType.Close)
                     {
+                        System.Diagnostics.Debug.WriteLine("[Nesti WS] Server sent Close frame — will reconnect");
                         reconnect = true;
                         return;
                     }
@@ -177,7 +194,11 @@ public sealed class WebSocketService : IWebSocketSource
             }
         }
         catch (OperationCanceledException) { return; }
-        catch { reconnect = true; }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Nesti WS] ListenAsync error: {ex.Message}");
+            reconnect = true;
+        }
         finally
         {
             ArrayPool<byte>.Shared.Return(buffer);   // always returned, even on exception
@@ -193,11 +214,15 @@ public sealed class WebSocketService : IWebSocketSource
         {
             using var doc = JsonDocument.Parse(json);
 
-            // Handle pong — cancels the 7s timeout to confirm the link is alive
+            // Handle pong — set flag so WatchForPongAsync doesn't abort the socket.
+            // Using a volatile flag instead of CancellationTokenSource.Register avoids
+            // the race where a fast pong (2-20 ms) cancels the token before Register()
+            // is called, which would invoke the abort callback synchronously.
             if (doc.RootElement.TryGetProperty("type", out var typeProp) &&
                 typeProp.GetString() == "pong")
             {
-                _pongCts?.Cancel();
+                _pongReceived = true;
+                System.Diagnostics.Debug.WriteLine("[Nesti WS] Pong received");
                 return;
             }
 
@@ -208,23 +233,24 @@ public sealed class WebSocketService : IWebSocketSource
         catch { /* ignore malformed JSON */ }
     }
 
+    /// <summary>
+    /// Exponential back-off reconnect — never gives up.
+    /// After WsReconnectMaxAttempts the delay caps at 60 s and retries indefinitely.
+    /// </summary>
     private async Task ScheduleReconnectAsync()
     {
         _attempt++;
-        if (_attempt > AppConfig.WsReconnectMaxAttempts)
-        {
-            Raise("failed");
-            return;
-        }
 
-        // Exponential back-off capped at 60 s, with ±10% jitter to prevent
-        // thundering-herd when many clients reconnect simultaneously.
+        // Cap so the delay calculation saturates at 60 s, but never stop trying.
+        int cappedAttempt = Math.Min(_attempt, AppConfig.WsReconnectMaxAttempts);
+
         var delay = Math.Min(
-            AppConfig.WsReconnectBaseMs * (int)Math.Pow(2, _attempt - 1),
+            AppConfig.WsReconnectBaseMs * (int)Math.Pow(2, cappedAttempt - 1),
             60_000);
         delay += (int)(delay * (Random.Shared.NextDouble() * 0.2 - 0.1));
 
         Raise("reconnecting");
+        System.Diagnostics.Debug.WriteLine($"[Nesti WS] Reconnect attempt={_attempt} (delay={delay}ms)");
 
         try   { await Task.Delay(delay, _cts.Token); }
         catch (OperationCanceledException) { return; }
@@ -245,32 +271,60 @@ public sealed class WebSocketService : IWebSocketSource
     {
         _heartbeatTimer?.Dispose();
         _heartbeatTimer = null;
-        _pongCts?.Cancel();
-        _pongCts?.Dispose();
-        _pongCts = null;
+        // WatchForPongAsync tasks use _cts.Token, so cancelling _cts (done in
+        // TryConnectAsync and Dispose) already terminates any pending watcher.
     }
 
     private async void OnHeartbeatTick(object? state)
     {
-        if (_ws?.State != WebSocketState.Open) return;
-
+        if (_ws?.State != WebSocketState.Open || _isShuttingDown) return;
         try
         {
-            var ping  = JsonSerializer.Serialize(new { type = "ping", timestamp = DateTime.UtcNow.ToString("O") });
-            var bytes = Encoding.UTF8.GetBytes(ping);
-            await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cts.Token);
+            // Reset flag before sending so any arriving pong in the new window
+            // is correctly attributed to this heartbeat cycle.
+            _pongReceived = false;
 
-            // If no pong arrives within 7 s, abort the socket — ListenAsync will reconnect.
-            _pongCts?.Cancel();
-            _pongCts?.Dispose();
-            _pongCts = new CancellationTokenSource(AppConfig.WsPongTimeoutMs);
-            _pongCts.Token.Register(() =>
-            {
-                if (_ws?.State == WebSocketState.Open)
-                    _ws.Abort();
-            });
+            // Static payload — no allocation per tick.
+            await _ws.SendAsync(
+                new ArraySegment<byte>(PingPayload),
+                WebSocketMessageType.Text,
+                true,
+                _cts.Token);
+
+            // Spawn a lightweight watcher that aborts the socket after the pong
+            // timeout only if _pongReceived is still false.
+            _ = WatchForPongAsync();
+
+            System.Diagnostics.Debug.WriteLine("[Nesti WS] Ping sent");
         }
         catch { }
+    }
+
+    /// <summary>
+    /// Waits WsPongTimeoutMs.  If _pongReceived is still false after the wait,
+    /// the connection is considered dead and the socket is aborted so ListenAsync
+    /// triggers a reconnect.
+    ///
+    /// Uses the service-level _cts.Token so it is automatically cancelled (and
+    /// exits cleanly) when the service is disposed or reconnecting — no separate
+    /// CancellationTokenSource is allocated per heartbeat cycle.
+    /// </summary>
+    private async Task WatchForPongAsync()
+    {
+        try
+        {
+            await Task.Delay(AppConfig.WsPongTimeoutMs, _cts.Token);
+
+            // Check flag only after the full timeout — avoids the race where
+            // a fast pong sets _pongReceived=true in the window between the
+            // delay completing and this check.
+            if (!_pongReceived && _ws?.State == WebSocketState.Open && !_isShuttingDown)
+            {
+                System.Diagnostics.Debug.WriteLine("[Nesti WS] Pong timeout — aborting for reconnect");
+                _ws.Abort();   // triggers ListenAsync exception → ScheduleReconnectAsync
+            }
+        }
+        catch (OperationCanceledException) { /* service disposed or reconnecting — normal */ }
     }
 
     private void Raise(string status) =>
