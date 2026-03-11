@@ -15,6 +15,11 @@ public static class NotificationApiService
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(5) };
 
+    /// <summary>
+    /// Disposes the shared HttpClient. Call once on application exit.
+    /// </summary>
+    public static void Dispose() => Http.Dispose();
+
     // ── Mark as read ──────────────────────────────────────────────────────────
 
     /// <summary>
@@ -27,13 +32,14 @@ public static class NotificationApiService
     ///   "actionTaken":  "Automatic Read"  |  "Manual Read"
     /// }
     /// </summary>
-    public static async Task MarkAsReadAsync(string instanceId, string userSession, string actionTaken)
+    public static async Task MarkAsReadAsync(string instanceId, long userSession, string actionTaken)
     {
         var url = AppConfig.MarkAsReadUrl;
         if (string.IsNullOrEmpty(url)) return;
 
         try
         {
+            System.Diagnostics.Debug.WriteLine($"[Nesti] MarkAsReadAsync: POST {url} instance={instanceId} action={actionTaken}");
             var json = JsonSerializer.Serialize(new
             {
                 instance_id  = instanceId,
@@ -58,7 +64,7 @@ public static class NotificationApiService
     ///   "snoozeDurationMinutes": {SNOOZE_DURATION_MINUTES from .env, default 5}
     /// }
     /// </summary>
-    public static async Task SnoozeAsync(string instanceId, string userSession)
+    public static async Task SnoozeAsync(string instanceId, long userSession)
     {
         var url = AppConfig.MarsSnoozeUrl;
         if (string.IsNullOrEmpty(url)) return;

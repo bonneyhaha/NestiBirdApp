@@ -27,19 +27,20 @@ public sealed class WebSocketService : IWebSocketSource
     private int                        _attempt;
 
     // ── Heartbeat ─────────────────────────────────────────────────────────────
-    private const int HeartbeatIntervalMs = 25_000;
-    private const int PongTimeoutMs       =  7_000;
     private Timer?                     _heartbeatTimer;
     private CancellationTokenSource?   _pongCts;
+
+    // ── Shutdown guard ────────────────────────────────────────────────────────
+    private bool _isShuttingDown;
 
     public bool IsConnected => _ws?.State == WebSocketState.Open;
 
     /// <summary>
-    /// The mEmpID returned by the API during URL resolution.
+    /// The mEmpID returned by the API during URL resolution (numeric employee ID).
     /// Used as the userSession field in all notification action API payloads.
-    /// Empty string if API_BASE_URL is not configured or the call failed.
+    /// Zero if API_BASE_URL is not configured or the call failed.
     /// </summary>
-    public string MemberId { get; private set; } = string.Empty;
+    public long MemberId { get; private set; }
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -67,11 +68,20 @@ public sealed class WebSocketService : IWebSocketSource
                 var raw    = await client.GetStringAsync(apiUrl);
 
                 using var doc = JsonDocument.Parse(raw);
-                if (doc.RootElement.TryGetProperty("mEmpID", out var prop) &&
-                    prop.GetString() is { Length: > 0 } mEmpId)
+                if (doc.RootElement.TryGetProperty("mEmpID", out var prop))
                 {
-                    MemberId = mEmpId;
-                    return $"{wsBase}/{mEmpId}";
+                    long mEmpId = 0;
+                    if (prop.ValueKind == System.Text.Json.JsonValueKind.Number)
+                        prop.TryGetInt64(out mEmpId);
+                    else if (prop.ValueKind == System.Text.Json.JsonValueKind.String)
+                        long.TryParse(prop.GetString(), out mEmpId);
+
+                    if (mEmpId != 0)
+                    {
+                        MemberId = mEmpId;
+                        System.Diagnostics.Debug.WriteLine($"[Nesti WS] mEmpID resolved: {mEmpId}");
+                        return $"{wsBase}/{mEmpId}";
+                    }
                 }
             }
             catch { /* fall through to default URL */ }
@@ -90,9 +100,12 @@ public sealed class WebSocketService : IWebSocketSource
 
     public void Dispose()
     {
+        _isShuttingDown = true;
+        System.Diagnostics.Debug.WriteLine("[Nesti WS] Disposing WebSocketService");
         StopHeartbeat();
         _cts.Cancel();
         _ws?.Dispose();
+        System.Diagnostics.Debug.WriteLine("[Nesti WS] WebSocketService disposed");
     }
 
     // ── Internal connection logic ─────────────────────────────────────────────
@@ -107,7 +120,9 @@ public sealed class WebSocketService : IWebSocketSource
         _ws?.Dispose();
         _ws = new ClientWebSocket();
 
+        if (_isShuttingDown) return;
         Raise(_attempt == 0 ? "connecting" : "reconnecting");
+        System.Diagnostics.Debug.WriteLine($"[Nesti WS] TryConnectAsync attempt={_attempt} url={_url}");
 
         try
         {
@@ -117,6 +132,7 @@ public sealed class WebSocketService : IWebSocketSource
 
             await _ws.ConnectAsync(new Uri(_url), linkedCts.Token);
             _attempt = 0;
+            System.Diagnostics.Debug.WriteLine("[Nesti WS] Connected successfully");
             Raise("connected");
             StartHeartbeat();
             _ = ListenAsync(_cts.Token);   // fire-and-forget
@@ -167,7 +183,7 @@ public sealed class WebSocketService : IWebSocketSource
             ArrayPool<byte>.Shared.Return(buffer);   // always returned, even on exception
         }
 
-        if (reconnect && !ct.IsCancellationRequested)
+        if (reconnect && !ct.IsCancellationRequested && !_isShuttingDown)
             await ScheduleReconnectAsync();
     }
 
@@ -218,8 +234,12 @@ public sealed class WebSocketService : IWebSocketSource
 
     // ── Heartbeat ─────────────────────────────────────────────────────────────
 
-    private void StartHeartbeat() =>
-        _heartbeatTimer = new Timer(OnHeartbeatTick, null, HeartbeatIntervalMs, HeartbeatIntervalMs);
+    private void StartHeartbeat()
+    {
+        var interval = AppConfig.WsHeartbeatIntervalMs;
+        _heartbeatTimer = new Timer(OnHeartbeatTick, null, interval, interval);
+        System.Diagnostics.Debug.WriteLine($"[Nesti WS] Heartbeat started (interval={interval}ms)");
+    }
 
     private void StopHeartbeat()
     {
@@ -243,7 +263,7 @@ public sealed class WebSocketService : IWebSocketSource
             // If no pong arrives within 7 s, abort the socket — ListenAsync will reconnect.
             _pongCts?.Cancel();
             _pongCts?.Dispose();
-            _pongCts = new CancellationTokenSource(PongTimeoutMs);
+            _pongCts = new CancellationTokenSource(AppConfig.WsPongTimeoutMs);
             _pongCts.Token.Register(() =>
             {
                 if (_ws?.State == WebSocketState.Open)

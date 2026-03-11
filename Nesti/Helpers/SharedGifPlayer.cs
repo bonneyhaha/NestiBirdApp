@@ -128,6 +128,28 @@ public sealed class SharedGifPlayer
         }
     }
 
+    /// <summary>
+    /// Stops the animation timer and releases resources for this player instance.
+    /// </summary>
+    public void Dispose()
+    {
+        _timer.Stop();
+        _timer.Tick -= Advance;
+        System.Diagnostics.Debug.WriteLine($"[Nesti] SharedGifPlayer disposed");
+    }
+
+    /// <summary>
+    /// Disposes all cached GIF player instances and clears the cache.
+    /// Called on application exit to prevent timer leaks.
+    /// </summary>
+    public static void ClearAll()
+    {
+        foreach (var player in _cache.Values)
+            player.Dispose();
+        _cache.Clear();
+        System.Diagnostics.Debug.WriteLine("[Nesti] SharedGifPlayer.ClearAll: all instances disposed");
+    }
+
     // ── Animation loop ────────────────────────────────────────────────────────
     private void Advance(object? sender, EventArgs e)
     {

@@ -14,6 +14,31 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
+  <!-- ── Release publish settings (used by: dotnet publish -c Release -r win-x64) ── -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <!-- Bundle everything into one .exe — no install needed on target PC -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+
+    <!-- Compress embedded assemblies with Brotli — saves ~30-40% on top of trimming -->
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+
+    <!-- NOTE: PublishTrimmed is intentionally omitted — WPF uses runtime reflection
+         for XAML loading and is incompatible with IL trimming (NETSDK1168). -->
+
+    <!-- Remove all locale/culture data except invariant — saves ~8 MB -->
+    <!-- Safe here: Nesti only displays raw notification strings, no locale formatting -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- Strip debug symbols — saves ~2 MB -->
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+
+    <!-- Do not include the .NET IL interpreter — saves ~1 MB -->
+    <PublishReadyToRun>false</PublishReadyToRun>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- .env file reader -->
     <PackageReference Include="DotNetEnv" Version="3.1.1" />
@@ -22,7 +47,6 @@
   <ItemGroup>
     <!-- GIFs embedded as WPF resources (pack:// URI) -->
     <Resource Include="assets\nest_bird.gif" />
-    <Resource Include="assets\jarvis.gif" />
 
     <!-- PNG icons embedded as WPF resources -->
     <Resource Include="assets\cross_button_notif_icon.png" />

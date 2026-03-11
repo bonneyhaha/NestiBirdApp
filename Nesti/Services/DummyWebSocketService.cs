@@ -71,16 +71,43 @@ public sealed class DummyWebSocketService : IWebSocketSource
     public Task ConnectAsync(string url)
     {
         StatusChanged?.Invoke(this, "connected (dummy mode)");
+
+        var burst = AppConfig.DummyBurstCount;
+        if (burst > 0)
+            _ = FireBurstAsync(burst);
+
         _timer.Start();
         return Task.CompletedTask;
     }
 
-    private void OnTick(object? sender, EventArgs e)
+    /// <summary>
+    /// Fires <paramref name="count"/> notifications as fast as possible
+    /// to stress-test the UI (eviction, animations, memory under load).
+    /// A 300 ms startup delay lets the window finish loading first.
+    /// </summary>
+    private async Task FireBurstAsync(int count)
+    {
+        await Task.Delay(300);
+        System.Diagnostics.Debug.WriteLine($"[Nesti] Burst: firing {count} notifications");
+
+        for (int i = 0; i < count; i++)
+        {
+            FireOne();
+            // 10 ms gap lets the UI thread process each Dispatcher.Invoke
+            // without freezing, while still appearing near-simultaneous.
+            await Task.Delay(10);
+        }
+
+        System.Diagnostics.Debug.WriteLine($"[Nesti] Burst: done");
+    }
+
+    private void OnTick(object? sender, EventArgs e) => FireOne();
+
+    private void FireOne()
     {
         var (title, message, notifUrl) = Samples[_index % Samples.Length];
         _index++;
 
-        // Each firing gets a unique id so DedupeKey never suppresses it
         var uniqueId = $"dummy-{_index}-{DateTime.Now.Ticks}";
 
         NotificationReceived?.Invoke(this, new NotificationMessage

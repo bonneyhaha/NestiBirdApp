@@ -17,8 +17,8 @@ public partial class MainWindow : Window
     private const int HTTRANSPARENT    = -1;
     private const int HTCLIENT         =  1;
     private const int GWL_EXSTYLE      = -20;
-    private const int WS_EX_TOOLWINDOW = 0x00000080;  // exclude from Alt+Tab / taskbar
-    private const int WS_EX_APPWINDOW  = 0x00040000;  // force taskbar presence (we clear this)
+    private const int WS_EX_TOOLWINDOW = 0x00000080;
+    private const int WS_EX_APPWINDOW  = 0x00040000;
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern int GetWindowLong(IntPtr hwnd, int index);
@@ -27,19 +27,24 @@ public partial class MainWindow : Window
     private static extern int SetWindowLong(IntPtr hwnd, int index, int value);
 
     // ── Services ──────────────────────────────────────────────────────────────
-    private IWebSocketSource? _ws;                          // set in Window_Loaded
+    private IWebSocketSource? _ws;
     private readonly SoundService _sound;
+    private HwndSource? _hwndSource;
 
     // mEmpID returned by the user-ID API — used as userSession in every API payload.
-    // Populated in Window_Loaded after ResolveUrlAsync. Empty in dummy mode.
-    private string _mEmpId = string.Empty;
+    private long _mEmpId;
 
     // ── State ─────────────────────────────────────────────────────────────────
     private readonly HashSet<string> _seenIds      = new();
-    private readonly Queue<string>   _seenIdsOrder = new();   // insertion-order shadow for eviction
-    private const    int             MaxSeenIds    = 500;     // cap — prevents unbounded growth
+    private readonly Queue<string>   _seenIdsOrder = new();
+    private const    int             MaxSeenIds    = 500;
 
-    private readonly List<(NotificationControl Ctrl, DispatcherTimer Timer)> _active = new();
+    // Visible stack — index 0 = newest (top of screen), last = oldest (near bird)
+    private readonly List<(NotificationControl Ctrl, DispatcherTimer Timer)> _active   = new();
+    // Overflow: queued when stack is full, dequeued as slots open
+    private readonly Queue<NotificationMessage>                               _overflow = new();
+    // Object pool: reuse card controls to avoid repeated construction / GC pressure
+    private readonly Stack<NotificationControl>                               _pool     = new();
     private bool _birdHidden;
 
     // ── Constructor ───────────────────────────────────────────────────────────
@@ -59,35 +64,59 @@ public partial class MainWindow : Window
     }
 
     // ── Startup ───────────────────────────────────────────────────────────────
-    private async void Window_Loaded(object sender, RoutedEventArgs e)
+
+    // Proper async pattern: event handler delegates to an async Task method
+    // so exceptions are logged rather than silently swallowed on async void.
+    private void Window_Loaded(object sender, RoutedEventArgs e)
     {
-        PositionAtBottomRight();
-        InstallWndProcHook();
+        _ = Window_LoadedAsync();
+    }
 
-        // Point the bird at the shared WriteableBitmap — no event handler needed.
-        BirdImage.Source = SharedGifPlayer.Get("pack://application:,,,/assets/nest_bird.gif").SharedBitmap;
-
-        var sysName = UserHelper.GetSystemUsername();
-
-        // Pick real WebSocket or dummy test service based on .env flag
-        if (AppConfig.UseRealWebSocket)
+    private async Task Window_LoadedAsync()
+    {
+        try
         {
-            var realWs = new WebSocketService();
-            _ws = realWs;
-            _ws.NotificationReceived += OnNotificationReceived;
-            _ws.StatusChanged        += OnStatusChanged;
+            System.Diagnostics.Debug.WriteLine("[Nesti] Window_LoadedAsync: starting");
 
-            var wsUrl = await realWs.ResolveUrlAsync(sysName);
-            _mEmpId = realWs.MemberId;   // store for use in all API payloads
-            await _ws.ConnectAsync(wsUrl);
+            PositionAtBottomRight();
+            InstallWndProcHook();
+
+            BirdImage.Source = SharedGifPlayer.Get("pack://application:,,,/assets/nest_bird.gif").SharedBitmap;
+            System.Diagnostics.Debug.WriteLine("[Nesti] Bird GIF loaded");
+
+            var sysName = UserHelper.GetSystemUsername();
+            System.Diagnostics.Debug.WriteLine($"[Nesti] System username: {sysName}");
+
+            if (AppConfig.UseRealWebSocket)
+            {
+                System.Diagnostics.Debug.WriteLine("[Nesti] Real WebSocket mode");
+                var realWs = new WebSocketService();
+                _ws = realWs;
+                _ws.NotificationReceived += OnNotificationReceived;
+                _ws.StatusChanged        += OnStatusChanged;
+
+                System.Diagnostics.Debug.WriteLine("[Nesti] Resolving WebSocket URL...");
+                var wsUrl = await realWs.ResolveUrlAsync(sysName);
+                _mEmpId = realWs.MemberId;
+                System.Diagnostics.Debug.WriteLine($"[Nesti] mEmpId={_mEmpId}, wsUrl={wsUrl}");
+
+                await _ws.ConnectAsync(wsUrl);
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine("[Nesti] Dummy WebSocket mode");
+                _ws = new DummyWebSocketService();
+                _ws.NotificationReceived += OnNotificationReceived;
+                _ws.StatusChanged        += OnStatusChanged;
+
+                await _ws.ConnectAsync(string.Empty);
+            }
+
+            System.Diagnostics.Debug.WriteLine("[Nesti] Window_LoadedAsync: complete");
         }
-        else
+        catch (Exception ex)
         {
-            _ws = new DummyWebSocketService();
-            _ws.NotificationReceived += OnNotificationReceived;
-            _ws.StatusChanged        += OnStatusChanged;
-
-            await _ws.ConnectAsync(string.Empty); // url unused in dummy mode
+            System.Diagnostics.Debug.WriteLine($"[Nesti] Window_LoadedAsync ERROR: {ex}");
         }
     }
 
@@ -102,18 +131,14 @@ public partial class MainWindow : Window
     {
         var hwnd = new WindowInteropHelper(this).Handle;
 
-        // Reliably hide from Alt+Tab and the taskbar on Windows 10/11.
-        // ShowInTaskbar="False" alone is not sufficient for WindowStyle="None" windows.
         int ex = GetWindowLong(hwnd, GWL_EXSTYLE);
         SetWindowLong(hwnd, GWL_EXSTYLE, (ex | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW);
 
-        var source = HwndSource.FromHwnd(hwnd);
-        source?.AddHook(WndProc);
+        _hwndSource = HwndSource.FromHwnd(hwnd);
+        _hwndSource?.AddHook(WndProc);
     }
 
     // ── Selective click-through via WM_NCHITTEST ──────────────────────────────
-    // Empty transparent areas return HTTRANSPARENT so clicks fall through to the
-    // desktop. Only the bird and live notification cards are HTCLIENT (clickable).
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam,
                            ref bool handled)
     {
@@ -121,10 +146,8 @@ public partial class MainWindow : Window
 
         handled = true;
 
-        // When the bird is hidden, the whole window is transparent
         if (_birdHidden) return (IntPtr)HTTRANSPARENT;
 
-        // Decode screen coordinates from lParam
         int sx = unchecked((short)(lParam.ToInt64() & 0xFFFF));
         int sy = unchecked((short)((lParam.ToInt64() >> 16) & 0xFFFF));
         var screenPt = new Point(sx, sy);
@@ -146,10 +169,6 @@ public partial class MainWindow : Window
     {
         try
         {
-            // Use PointToScreen for BOTH corners so the rect is in physical pixels,
-            // matching the WM_NCHITTEST lParam. Using new Size(ActualWidth, ActualHeight)
-            // is wrong on DPI > 100% because ActualWidth is in DIPs, causing the right
-            // portion of the element (where the action buttons live) to be excluded.
             var tl = el.PointToScreen(new Point(0, 0));
             var br = el.PointToScreen(new Point(el.ActualWidth, el.ActualHeight));
             return new Rect(tl, br).Contains(screen);
@@ -158,7 +177,6 @@ public partial class MainWindow : Window
     }
 
     // ── Bird hover ────────────────────────────────────────────────────────────
-    // Created once and reused — avoids allocating a new DispatcherTimer on every hover-out.
     private readonly DispatcherTimer _hideControlsTimer;
 
     private void BirdContainer_MouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
@@ -169,8 +187,6 @@ public partial class MainWindow : Window
 
     private void BirdContainer_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
     {
-        // Restart the timer each time the cursor leaves. Buttons collapse after 1.2 s
-        // of inactivity so the user has time to click them without rushing.
         _hideControlsTimer.Stop();
         _hideControlsTimer.Start();
     }
@@ -187,7 +203,7 @@ public partial class MainWindow : Window
     private void HideButton_Click(object sender, RoutedEventArgs e)
     {
         _birdHidden = true;
-        BirdContainer.Visibility    = Visibility.Collapsed;
+        BirdContainer.Visibility     = Visibility.Collapsed;
         NotificationsPanel.Visibility = Visibility.Collapsed;
     }
 
@@ -196,33 +212,68 @@ public partial class MainWindow : Window
 
     private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
     {
+        System.Diagnostics.Debug.WriteLine("[Nesti] Window_Closing: starting cleanup");
+
+        // Stop hover timer
         _hideControlsTimer.Stop();
-        foreach (var (_, timer) in _active)
+
+        // Unsubscribe WebSocket events before disposing to prevent late callbacks
+        if (_ws is not null)
+        {
+            _ws.NotificationReceived -= OnNotificationReceived;
+            _ws.StatusChanged        -= OnStatusChanged;
+            System.Diagnostics.Debug.WriteLine("[Nesti] WebSocket events unsubscribed");
+        }
+
+        // Stop and clear all notification timers, clean up each card
+        foreach (var (ctrl, timer) in _active)
+        {
             timer.Stop();
+            ctrl.Cleanup();
+        }
+        _active.Clear();
+        _overflow.Clear();
+        _pool.Clear();
+        NotificationsPanel.Children.Clear();
+        System.Diagnostics.Debug.WriteLine("[Nesti] Notification timers cleared");
+
+        // Remove WndProc hook
+        _hwndSource?.RemoveHook(WndProc);
+        System.Diagnostics.Debug.WriteLine("[Nesti] WndProc hook removed");
+
+        // Release bird bitmap reference
+        BirdImage.Source = null;
+
+        // Dispose services
         _sound.Dispose();
         _ws?.Dispose();
+
+        System.Diagnostics.Debug.WriteLine("[Nesti] Window_Closing: complete");
     }
 
     // ── Notification handling ─────────────────────────────────────────────────
     private void OnNotificationReceived(object? sender, NotificationMessage msg)
     {
-        // Always dispatch to the UI thread
         Dispatcher.Invoke(() =>
         {
-            // Deduplicate (capped — oldest IDs evicted once the set reaches MaxSeenIds)
             if (!TryAddSeen(msg.DedupeKey)) return;
 
-            // Restore bird if the user had hidden it
+            System.Diagnostics.Debug.WriteLine($"[Nesti] Notification received: {msg.Title} (id={msg.InstanceId})");
+
             if (_birdHidden)
             {
                 _birdHidden = false;
-                BirdContainer.Visibility     = Visibility.Visible;
+                BirdContainer.Visibility      = Visibility.Visible;
                 NotificationsPanel.Visibility = Visibility.Visible;
             }
 
-            // Evict oldest if at the limit
-            while (_active.Count >= AppConfig.MaxNotifications)
-                RemoveNotification(_active[0].Ctrl, animate: false);
+            // Stack full → queue for later; slot opens when any card is dismissed
+            if (_active.Count >= AppConfig.MaxNotifications)
+            {
+                _overflow.Enqueue(msg);
+                System.Diagnostics.Debug.WriteLine($"[Nesti] Queued (overflow={_overflow.Count}): {msg.Title}");
+                return;
+            }
 
             AddNotification(msg);
 
@@ -233,15 +284,14 @@ public partial class MainWindow : Window
 
     private void AddNotification(NotificationMessage msg)
     {
-        var ctrl = new NotificationControl();
-        ctrl.SetData(msg.Id ?? msg.DedupeKey, msg.Title, msg.Body, msg.Url,
-                     msg.UserId, _mEmpId);
-        ctrl.DismissRequested += (_, _) => RemoveNotification(ctrl);
-        ctrl.SnoozeRequested  += (_, _) => RemoveNotification(ctrl);
+        var ctrl = AcquireCard(msg);
 
-        NotificationsPanel.Children.Add(ctrl);
+        // Insert at index 0 so the newest card appears at the TOP of the stack.
+        // With VerticalAlignment=Bottom on the panel, existing cards keep their
+        // screen positions — the panel simply grows upward.
+        NotificationsPanel.Children.Insert(0, ctrl);
+        AdjustWindowHeight();
 
-        // Auto-dismiss timer — Case 1: calls MARK_AS_READ with actionTaken="Automatic Read"
         var timer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(AppConfig.NotificationDurationMs)
@@ -250,16 +300,36 @@ public partial class MainWindow : Window
         {
             timer.Stop();
 
-            // Only call API in real mode and when user_id != -1
             if (AppConfig.UseRealWebSocket && msg.UserId != -1 &&
                 !string.IsNullOrEmpty(msg.InstanceId))
+            {
+                System.Diagnostics.Debug.WriteLine($"[Nesti] Auto-dismiss MarkAsRead: {msg.InstanceId}");
                 _ = NotificationApiService.MarkAsReadAsync(msg.InstanceId, _mEmpId, "Automatic Read");
+            }
 
             RemoveNotification(ctrl);
         };
         timer.Start();
 
         _active.Add((ctrl, timer));
+    }
+
+    // ── Object pool helpers ───────────────────────────────────────────────────
+
+    private NotificationControl AcquireCard(NotificationMessage msg)
+    {
+        var ctrl = _pool.Count > 0 ? _pool.Pop() : new NotificationControl();
+        ctrl.SetData(msg.Id ?? msg.DedupeKey, msg.Title, msg.Body, msg.Url,
+                     msg.UserId, _mEmpId);
+        ctrl.DismissRequested += (_, _) => RemoveNotification(ctrl);
+        return ctrl;
+    }
+
+    private void ReleaseCard(NotificationControl ctrl)
+    {
+        ctrl.Cleanup(); // clears animations, text, and DismissRequested
+        if (_pool.Count < AppConfig.MaxNotifications)
+            _pool.Push(ctrl);
     }
 
     private void RemoveNotification(NotificationControl ctrl, bool animate = true)
@@ -270,26 +340,88 @@ public partial class MainWindow : Window
         _active[idx].Timer.Stop();
         _active.RemoveAt(idx);
 
-        if (animate)
-            ctrl.AnimateOut(() => { ctrl.Cleanup(); NotificationsPanel.Children.Remove(ctrl); });
-        else
+        // Snapshot screen-Y of all cards that sit ABOVE the removed card in the
+        // StackPanel (lower index = newer = higher on screen). When the card
+        // disappears the panel shrinks and those cards shift downward; we animate
+        // them back from their old positions so the shift looks smooth.
+        var panelIdx = NotificationsPanel.Children.IndexOf(ctrl);
+        var toReposition = new List<(NotificationControl Card, double OldY)>(panelIdx);
+        for (int i = 0; i < panelIdx; i++)
         {
-            ctrl.Cleanup();
-            NotificationsPanel.Children.Remove(ctrl);
+            if (NotificationsPanel.Children[i] is NotificationControl nc)
+            {
+                try { toReposition.Add((nc, nc.PointToScreen(new Point(0, 0)).Y)); }
+                catch { /* element not yet rendered */ }
+            }
         }
+
+        void FinishRemoval()
+        {
+            ReleaseCard(ctrl);
+            NotificationsPanel.Children.Remove(ctrl);
+
+            // Force layout so new positions are computed before we read them
+            NotificationsPanel.UpdateLayout();
+
+            foreach (var (card, oldY) in toReposition)
+            {
+                try
+                {
+                    double newY  = card.PointToScreen(new Point(0, 0)).Y;
+                    double delta = oldY - newY; // negative → card moved down
+                    if (Math.Abs(delta) > 0.5)
+                        card.AnimateRepositionY(delta);
+                }
+                catch { }
+            }
+
+            DequeueNext();
+            AdjustWindowHeight();
+        }
+
+        if (animate)
+            ctrl.AnimateOut(FinishRemoval);
+        else
+            FinishRemoval();
+    }
+
+    /// <summary>
+    /// Pops the next queued notification into the visible stack if a slot is free.
+    /// </summary>
+    private void DequeueNext()
+    {
+        if (_overflow.Count > 0 && _active.Count < AppConfig.MaxNotifications)
+        {
+            var next = _overflow.Dequeue();
+            System.Diagnostics.Debug.WriteLine($"[Nesti] Dequeued (remaining={_overflow.Count}): {next.Title}");
+            AddNotification(next);
+        }
+    }
+
+    /// <summary>
+    /// Resizes the window to match the current notification stack height,
+    /// keeping the bottom-right corner pinned to the work area.
+    /// </summary>
+    private void AdjustWindowHeight()
+    {
+        NotificationsPanel.UpdateLayout();
+        double stackH = NotificationsPanel.ActualHeight;
+        // 178 = bird zone (158) + bottom margin (5) + gap above bird (10) + small pad (5)
+        double newH = Math.Max(175.0, 178.0 + stackH);
+        if (Math.Abs(Height - newH) < 0.5) return;
+
+        double oldBottom = Top + Height;
+        Height = newH;
+        Top    = oldBottom - Height;
     }
 
     // ── WebSocket status ──────────────────────────────────────────────────────
     private void OnStatusChanged(object? sender, string status)
     {
-        // Log to debug output; extend here for a UI status indicator if needed
-        System.Diagnostics.Debug.WriteLine($"[Nesti WS] {status}");
+        System.Diagnostics.Debug.WriteLine($"[Nesti WS] Status: {status}");
     }
 
     // ── Utility ───────────────────────────────────────────────────────────────
-
-    // Returns false if the key was already seen (duplicate). Otherwise records it,
-    // evicting the oldest entry when the cap is reached so the set never grows unbounded.
     private bool TryAddSeen(string key)
     {
         if (_seenIds.Contains(key)) return false;

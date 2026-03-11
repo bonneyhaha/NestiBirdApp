@@ -17,9 +17,11 @@ public static class AppConfig
     }
 
     // ── WebSocket ─────────────────────────────────────────────────────────────
-    public static string WsUrl               => Str("WS_URL",                    "wss://localhost:8080/ws");
-    public static int    WsReconnectBaseMs   => Int("WS_RECONNECT_BASE_MS",      2_000);
-    public static int    WsReconnectMaxAttempts => Int("WS_RECONNECT_MAX_ATTEMPTS", 10);
+    public static string WsUrl                  => Str("WS_URL",                      "wss://localhost:8080/ws");
+    public static int    WsReconnectBaseMs      => Int("WS_RECONNECT_BASE_MS",         2_000);
+    public static int    WsReconnectMaxAttempts => Int("WS_RECONNECT_MAX_ATTEMPTS",    10);
+    public static int    WsHeartbeatIntervalMs  => Int("WS_HEARTBEAT_INTERVAL_MS",     25_000);
+    public static int    WsPongTimeoutMs        => Int("WS_PONG_TIMEOUT_MS",           7_000);
 
     // ── REST API ──────────────────────────────────────────────────────────────
     // Called as: GET {ApiBaseUrl}?CorpID=Corp\{windowsLogin}
@@ -42,6 +44,12 @@ public static class AppConfig
 
     /// <summary>How often the dummy service fires a test notification (ms).</summary>
     public static int  DummyIntervalMs  => Int("DUMMY_INTERVAL_MS",   5_000);
+
+    /// <summary>
+    /// How many notifications to fire instantly on startup for burst/stress testing.
+    /// 0 = disabled (normal timer-only mode).
+    /// </summary>
+    public static int  DummyBurstCount  => Int("DUMMY_BURST_COUNT",   0);
 
     // ── Notification action APIs ──────────────────────────────────────────────
     /// <summary>POST: snooze a notification. URL from MARS_SNOOZE_URL in .env.</summary>

@@ -9,40 +9,33 @@ namespace Nesti.Controls;
 
 public partial class NotificationControl : UserControl
 {
-    // ── Constants ─────────────────────────────────────────────────────────────
-    private const string AvatarGifUri = "pack://application:,,,/assets/jarvis.gif";
-
     // ── Public surface ────────────────────────────────────────────────────────
     public string? NotificationId  { get; private set; }
     public string? NotificationUrl { get; private set; }
 
     public event EventHandler? DismissRequested;
-    public event EventHandler? SnoozeRequested;
 
     // ── Per-notification API context ──────────────────────────────────────────
     // userId == -1 means the notification is a broadcast; skip all API calls.
-    private int?   _userId;
-    private string _mEmpId = string.Empty;
+    private int?  _userId;
+    private long  _mEmpId;
 
     // ── Constructor ───────────────────────────────────────────────────────────
     public NotificationControl()
     {
         InitializeComponent();
-
-        // Point at the shared WriteableBitmap — the player blits frame updates into it
-        // automatically. No event subscription, no cleanup wiring needed here.
-        AvatarImage.Source = SharedGifPlayer.Get(AvatarGifUri).SharedBitmap;
-
-        Loaded += OnLoaded;
+        // Re-subscribe every time the control is attached to the visual tree
+        // so pooled controls animate in correctly on reuse.
+        Loaded += (_, _) => AnimateIn();
     }
 
     /// <summary>
     /// Populates the card.
-    /// userId: the "user id" field from the WebSocket notification (-1 = broadcast, skip API).
+    /// userId: the "user_id" field from the WebSocket notification (-1 = broadcast, skip API).
     /// mEmpId: the mEmpID resolved at startup, used as userSession in API payloads.
     /// </summary>
     public void SetData(string notificationId, string title, string body, string? url,
-                        int? userId, string mEmpId)
+                        int? userId, long mEmpId)
     {
         NotificationId    = notificationId;
         TitleBlock.Text   = title;
@@ -53,9 +46,13 @@ public partial class NotificationControl : UserControl
     }
 
     // ── Animations ────────────────────────────────────────────────────────────
-    private void OnLoaded(object sender, RoutedEventArgs e)
+
+    /// <summary>
+    /// Plays the slide-in animation. Called automatically on Loaded (new cards)
+    /// and also fires on every re-attachment to the visual tree (pooled cards).
+    /// </summary>
+    public void AnimateIn()
     {
-        Loaded -= OnLoaded;
         var dur  = new Duration(TimeSpan.FromMilliseconds(1000));
         var ease = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.4 };
 
@@ -67,6 +64,18 @@ public partial class NotificationControl : UserControl
             new DoubleAnimation(0.9, 1, dur) { EasingFunction = ease });
         BeginAnimation(OpacityProperty,
             new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(400))));
+    }
+
+    /// <summary>
+    /// Smoothly repositions the card after the stack shifts vertically.
+    /// <paramref name="startOffset"/> is the Y distance to animate FROM (usually negative
+    /// when card shifts downward, so it visually appears to glide into its new slot).
+    /// </summary>
+    public void AnimateRepositionY(double startOffset)
+    {
+        SlideTransform.BeginAnimation(TranslateTransform.YProperty,
+            new DoubleAnimation(startOffset, 0, new Duration(TimeSpan.FromMilliseconds(250)))
+            { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
     }
 
     public void AnimateOut(Action? onComplete = null)
@@ -85,14 +94,25 @@ public partial class NotificationControl : UserControl
     }
 
     /// <summary>
-    /// Drops the reference to the shared bitmap and clears text.
-    /// The SharedGifPlayer keeps running — it owns the WriteableBitmap.
+    /// Clears event handlers, stops animations, and releases text references.
+    /// Called before the card is removed from the visual tree.
     /// </summary>
     public void Cleanup()
     {
-        AvatarImage.Source = null;
-        TitleBlock.Text    = null;
-        MessageBlock.Text  = null;
+        // Stop all running animations to release animation clock resources
+        BeginAnimation(OpacityProperty, null);
+        SlideTransform.BeginAnimation(TranslateTransform.XProperty, null);
+        SlideTransform.BeginAnimation(TranslateTransform.YProperty, null);
+        CardScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        CardScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+
+        // Clear event handler subscriptions to prevent memory leaks
+        DismissRequested = null;
+
+        TitleBlock.Text   = null;
+        MessageBlock.Text = null;
+
+        System.Diagnostics.Debug.WriteLine($"[Nesti] NotificationControl.Cleanup: {NotificationId}");
     }
 
     // ── Event handlers ────────────────────────────────────────────────────────
@@ -102,27 +122,8 @@ public partial class NotificationControl : UserControl
         if (!string.IsNullOrEmpty(NotificationUrl))
             OpenUrl(NotificationUrl);
 
-        // Treat card click as Manual Read
         CallMarkAsRead("Manual Read");
         DismissRequested?.Invoke(this, EventArgs.Empty);
-    }
-
-    private void Snooze_MouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
-    {
-        e.Handled = true;
-        (sender as UIElement)?.CaptureMouse();
-    }
-
-    private void Snooze_MouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
-    {
-        e.Handled = true;
-        (sender as UIElement)?.ReleaseMouseCapture();
-
-        // Only call snooze API in real mode and when userId != -1
-        if (AppConfig.UseRealWebSocket && _userId != -1 && !string.IsNullOrEmpty(NotificationId))
-            _ = NotificationApiService.SnoozeAsync(NotificationId, _mEmpId);
-
-        SnoozeRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void Dismiss_MouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
@@ -151,7 +152,10 @@ public partial class NotificationControl : UserControl
     private void CallMarkAsRead(string actionTaken)
     {
         if (AppConfig.UseRealWebSocket && _userId != -1 && !string.IsNullOrEmpty(NotificationId))
+        {
+            System.Diagnostics.Debug.WriteLine($"[Nesti] MarkAsRead: {NotificationId} action={actionTaken}");
             _ = NotificationApiService.MarkAsReadAsync(NotificationId, _mEmpId, actionTaken);
+        }
     }
 
     private static void OpenUrl(string url)
